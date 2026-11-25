@@ -17,12 +17,12 @@ Simulador brasileiro de máquinas pesadas • Edição Turno de Serra Alta
 
 | Plataforma | Arquivo | Disponibilidade |
 |---|---|---|
-| Android | APK | [Versões publicadas](https://github.com/riftsdev/TERRABRAVA-V1/releases) — compilação pendente |
-| iPhone / iPad | IPA | [Versões publicadas](https://github.com/riftsdev/TERRABRAVA-V1/releases) — compilação e assinatura pendentes |
-| Windows 64 bits | EXE | [Versões publicadas](https://github.com/riftsdev/TERRABRAVA-V1/releases) — compilação pendente |
+| Android | APK | [Versões publicadas](https://github.com/riftsdev/TERRABRAVA-V1/releases) — compilação automatizada |
+| iPhone / iPad | IPA | [Versões publicadas](https://github.com/riftsdev/TERRABRAVA-V1/releases) — compilação automatizada; assinatura necessária |
+| Windows 64 bits | EXE | [Versões publicadas](https://github.com/riftsdev/TERRABRAVA-V1/releases) — compilação automatizada |
 | PC / celular (web) | ZIP | **[Baixar agora](https://github.com/riftsdev/TERRABRAVA-V1/archive/refs/heads/main.zip)** |
 
-Os botões APK, IPA e EXE levam à área de versões, não a arquivos ainda inexistentes. A edição web já está no repositório. O IPA de distribuição alternativa precisa de assinatura válida antes de instalar.
+Os botões APK, IPA e EXE levam à área de versões. Os arquivos aparecem ali quando a respectiva compilação é concluída e publicada. Acompanhe a [compilação automática](https://github.com/riftsdev/TERRABRAVA-V1/actions). A edição web já está no repositório. O APK de teste usa assinatura de depuração; o EXE não tem assinatura comercial; o IPA precisa de assinatura válida antes de instalar.
 
 ## Entre na cabine. Transforme Serra Alta.
 
