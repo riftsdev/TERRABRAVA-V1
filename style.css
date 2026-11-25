@@ -112,3 +112,9 @@ dialog{color:#f6f6eb;background:#242924;border:1px solid #69705e;border-radius:9
  #roadArrows [data-arrow=forward]{color:var(--gold);border-color:#dbab64a6}
  #roadArrows button.active{background:#f4c47d;color:#17211a;transform:translateY(1px)}
 }
+
+/* Prevent long-press selection on game controls. */
+html,body,body *{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+img,svg{-webkit-user-drag:none;user-select:none}
+input:not([type=range]),textarea,[contenteditable=true]{-webkit-user-select:text;user-select:text;-webkit-touch-callout:default}
+#scene,.hud button,.stick,#roadArrows button{touch-action:none}

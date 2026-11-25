@@ -1,0 +1,40 @@
+name: Publicar Terra Brava PWA
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '*.js'
+      - '*.css'
+      - '*.html'
+      - 'manifest.webmanifest'
+      - 'assets/**'
+      - '.github/workflows/pwa-pages.yml'
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: terra-brava-pages
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+      - run: |
+          mkdir -p site
+          cp index.html style.css manifest.webmanifest *.js site/
+          cp -r assets site/
+          touch site/.nojekyll
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - uses: actions/deploy-pages@v4
+        id: deployment

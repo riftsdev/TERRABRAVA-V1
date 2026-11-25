@@ -9,6 +9,7 @@ Simulador brasileiro de máquinas pesadas • Edição Turno de Serra Alta
 [![Android APK](https://img.shields.io/badge/ANDROID-APK-3DDC84?style=for-the-badge&logo=android&logoColor=white)](https://github.com/riftsdev/TERRABRAVA-V1/releases)
 [![iPhone IPA](https://img.shields.io/badge/iPHONE-IPA-333333?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/riftsdev/TERRABRAVA-V1/releases)
 [![Windows EXE](https://img.shields.io/badge/WINDOWS-EXE-0078D4?style=for-the-badge)](https://github.com/riftsdev/TERRABRAVA-V1/releases)
+[![Jogar PWA](https://img.shields.io/badge/JOGAR-PWA-FFAC32?style=for-the-badge)](https://riftsdev.github.io/TERRABRAVA-V1/)
 [![Web ZIP](https://img.shields.io/badge/WEB-BAIXAR_ZIP-D99B35?style=for-the-badge)](https://github.com/riftsdev/TERRABRAVA-V1/archive/refs/heads/main.zip)
 
 </div>
@@ -20,6 +21,7 @@ Simulador brasileiro de máquinas pesadas • Edição Turno de Serra Alta
 | Android | APK | [Versões publicadas](https://github.com/riftsdev/TERRABRAVA-V1/releases) — compilação automatizada |
 | iPhone / iPad | IPA | [Versões publicadas](https://github.com/riftsdev/TERRABRAVA-V1/releases) — compilação automatizada; assinatura necessária |
 | Windows 64 bits | EXE | [Versões publicadas](https://github.com/riftsdev/TERRABRAVA-V1/releases) — compilação automatizada |
+| iPhone / Android / PC | PWA | [Abrir jogo](https://riftsdev.github.io/TERRABRAVA-V1/) — após publicação no Pages |
 | PC / celular (web) | ZIP | **[Baixar agora](https://github.com/riftsdev/TERRABRAVA-V1/archive/refs/heads/main.zip)** |
 
 Os botões APK, IPA e EXE levam à área de versões. Os arquivos aparecem ali quando a respectiva compilação é concluída e publicada. Acompanhe a [compilação automática](https://github.com/riftsdev/TERRABRAVA-V1/actions). A edição web já está no repositório. O APK de teste usa assinatura de depuração; o EXE não tem assinatura comercial; o IPA precisa de assinatura válida antes de instalar.
@@ -52,6 +54,10 @@ Entre um serviço e outro, percorra a região de moto, abasteça a frota com a p
 - Controles inspirados na operação brasileira: analógico direito para a esquerda fecha a concha; para a direita abre.
 - HUD adaptado ao toque, teclado e gamepad, contador de FPS e ajustes gráficos.
 - Sons de motor, hidráulica e ambiente, caminhada e salvamento local automático.
+
+## Instalar sem IPA (PWA)
+
+Abra [Terra Brava no navegador](https://riftsdev.github.io/TERRABRAVA-V1/). No iPhone, use Safari → Compartilhar → Adicionar à Tela de Início. No Android ou PC, use a opção de instalar aplicativo do navegador, quando disponível. Após o primeiro carregamento completo, os recursos ficam em cache para jogar offline (sujeito ao armazenamento do navegador). Jogue em paisagem. Nenhum certificado é necessário para a edição PWA.
 
 ## Como jogar a edição web
 
