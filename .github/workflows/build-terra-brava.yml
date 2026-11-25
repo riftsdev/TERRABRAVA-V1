@@ -1,0 +1,256 @@
+name: Terra Brava - builds V1
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/build-terra-brava.yml'
+permissions:
+  contents: write
+concurrency:
+  group: terra-brava-build-v1
+  cancel-in-progress: false
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+      - name: Prepare Android WebView app
+        shell: bash
+        run: |
+          mkdir -p native-android/app/src/main/assets/www native-android/app/src/main/java/com/riftsdev/terrabrava native-android/app/src/main/res
+          cp index.html style.css *.js manifest.webmanifest native-android/app/src/main/assets/www/
+          cp -r assets native-android/app/src/main/assets/www/
+          cp -r android/app/src/main/res/mipmap-* native-android/app/src/main/res/
+          cd native-android
+          cat > settings.gradle <<'EOF'
+          pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+          dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }
+          rootProject.name = 'TerraBrava'
+          include ':app'
+          EOF
+          cat > app/build.gradle <<'EOF'
+          plugins { id 'com.android.application' version '8.7.3' }
+          android {
+            namespace 'com.riftsdev.terrabrava'
+            compileSdk 35
+            defaultConfig {
+              applicationId 'com.riftsdev.terrabrava'
+              minSdk 23
+              targetSdk 35
+              versionCode 1
+              versionName '1.0'
+            }
+          }
+          dependencies { implementation 'androidx.webkit:webkit:1.12.1' }
+          EOF
+          echo 'android.useAndroidX=true' > gradle.properties
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+            <application android:label="Terra Brava" android:icon="@mipmap/ic_launcher" android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen" android:hardwareAccelerated="true" android:allowBackup="true">
+              <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="sensorLandscape" android:configChanges="orientation|screenSize|keyboardHidden">
+                <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
+              </activity>
+            </application>
+          </manifest>
+          EOF
+          cat > app/src/main/java/com/riftsdev/terrabrava/MainActivity.java <<'EOF'
+          package com.riftsdev.terrabrava;
+          import android.app.Activity;
+          import android.os.Bundle;
+          import android.view.View;
+          import android.webkit.*;
+          import androidx.webkit.WebViewAssetLoader;
+          public class MainActivity extends Activity {
+            @Override public void onCreate(Bundle state) {
+              super.onCreate(state);
+              getWindow().getDecorView().setSystemUiVisibility(5894);
+              WebView web = new WebView(this);
+              WebViewAssetLoader loader = new WebViewAssetLoader.Builder()
+                .addPathHandler("/assets/", new WebViewAssetLoader.AssetsPathHandler(this)).build();
+              web.setWebViewClient(new WebViewClient() {
+                @Override public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+                  return loader.shouldInterceptRequest(request.getUrl());
+                }
+                @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+                  return !"appassets.androidplatform.net".equals(request.getUrl().getHost());
+                }
+              });
+              web.getSettings().setJavaScriptEnabled(true);
+              web.getSettings().setDomStorageEnabled(true);
+              web.getSettings().setAllowFileAccess(false);
+              web.getSettings().setAllowContentAccess(false);
+              web.setWebChromeClient(new WebChromeClient());
+              web.setKeepScreenOn(true);
+              setContentView(web);
+              web.loadUrl("https://appassets.androidplatform.net/assets/www/index.html");
+            }
+          }
+          EOF
+      - name: Build debug-signed APK
+        run: |
+          cd native-android
+          gradle --no-daemon assembleDebug
+          mkdir -p ../dist
+          cp app/build/outputs/apk/debug/app-debug.apk ../dist/Terra-Brava-Android.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: terra-brava-android
+          path: dist/Terra-Brava-Android.apk
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build portable Electron executable
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force desktop,www-unused | Out-Null
+          New-Item -ItemType Directory -Force desktop/www | Out-Null
+          Copy-Item index.html,style.css,manifest.webmanifest desktop/www/
+          Copy-Item *.js desktop/www/
+          Copy-Item assets desktop/www/ -Recurse
+          Set-Location desktop
+          @'
+          {"name":"terra-brava","version":"1.0.0","description":"Simulador de maquinas de Serra Alta","author":"riftsdev","main":"main.cjs","build":{"appId":"com.riftsdev.terrabrava","productName":"Terra Brava","files":["main.cjs","www/**/*"],"win":{"target":[{"target":"portable","arch":["x64"]}],"icon":"www/assets/icone-512.png","signAndEditExecutable":false},"portable":{"artifactName":"Terra-Brava-Windows.exe"}}}
+          '@ | Set-Content -Encoding utf8 package.json
+          @'
+          const {app,BrowserWindow,session}=require('electron');
+          app.whenReady().then(()=>{
+            const w=new BrowserWindow({width:1280,height:720,autoHideMenuBar:true,backgroundColor:'#181b1a',webPreferences:{nodeIntegration:false,contextIsolation:true,sandbox:true}});
+            w.webContents.setWindowOpenHandler(()=>({action:'deny'}));
+            w.webContents.on('will-navigate',(e)=>e.preventDefault());
+            w.loadFile('www/index.html');
+          });
+          app.on('window-all-closed',()=>app.quit());
+          '@ | Set-Content -Encoding utf8 main.cjs
+          npm install --save-dev electron@38 electron-builder@26
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npx electron-builder --win portable --x64 --publish never
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: terra-brava-windows
+          path: desktop/dist/Terra-Brava-Windows.exe
+
+  ios:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare iOS app
+        run: |
+          brew install xcodegen
+          mkdir -p native-ios/www
+          cp index.html style.css *.js manifest.webmanifest native-ios/www/
+          cp -r assets native-ios/www/
+          cp -r ios/Assets.xcassets native-ios/
+          cd native-ios
+          cat > App.swift <<'EOF'
+          import UIKit
+          import WebKit
+          @main
+          class AppDelegate: UIResponder, UIApplicationDelegate {
+            var window: UIWindow?
+            func application(_ application: UIApplication, didFinishLaunchingWithOptions options: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+              let window = UIWindow(frame: UIScreen.main.bounds)
+              window.rootViewController = GameController()
+              window.makeKeyAndVisible()
+              self.window = window
+              application.isIdleTimerDisabled = true
+              return true
+            }
+          }
+          class GameController: UIViewController {
+            override var prefersStatusBarHidden: Bool { true }
+            override var prefersHomeIndicatorAutoHidden: Bool { true }
+            override func loadView() {
+              let config = WKWebViewConfiguration()
+              config.websiteDataStore = .default()
+              config.allowsInlineMediaPlayback = true
+              let web = WKWebView(frame: .zero, configuration: config)
+              web.scrollView.isScrollEnabled = false
+              view = web
+              if let url = Bundle.main.url(forResource: "index", withExtension: "html", subdirectory: "www") {
+                web.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
+              }
+            }
+          }
+          EOF
+          cat > project.yml <<'EOF'
+          name: TerraBrava
+          options:
+            deploymentTarget:
+              iOS: "15.0"
+          targets:
+            TerraBrava:
+              type: application
+              platform: iOS
+              sources:
+                - App.swift
+                - Assets.xcassets
+                - path: www
+                  type: folder
+                  buildPhase: resources
+              info:
+                path: Info.plist
+                properties:
+                  CFBundleDisplayName: Terra Brava
+                  UILaunchScreen: {}
+                  UISupportedInterfaceOrientations:
+                    - UIInterfaceOrientationLandscapeLeft
+                    - UIInterfaceOrientationLandscapeRight
+                  UISupportedInterfaceOrientations~ipad:
+                    - UIInterfaceOrientationLandscapeLeft
+                    - UIInterfaceOrientationLandscapeRight
+                  UIRequiresFullScreen: true
+              settings:
+                base:
+                  PRODUCT_BUNDLE_IDENTIFIER: com.riftsdev.terrabrava
+                  ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+                  SWIFT_VERSION: "5.0"
+                  MARKETING_VERSION: "1.0"
+                  CURRENT_PROJECT_VERSION: "1"
+          EOF
+          xcodegen generate
+      - name: Build unsigned IPA for later signing
+        run: |
+          cd native-ios
+          xcodebuild -project TerraBrava.xcodeproj -scheme TerraBrava -configuration Release -sdk iphoneos -derivedDataPath build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+          mkdir -p Payload ../dist
+          cp -R build/Build/Products/Release-iphoneos/TerraBrava.app Payload/
+          test -f Payload/TerraBrava.app/www/index.html
+          zip -qr ../dist/Terra-Brava-iOS-unsigned.ipa Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: terra-brava-ios
+          path: dist/Terra-Brava-iOS-unsigned.ipa
+
+  publish:
+    needs: [android, windows, ios]
+    if: ${{ always() && !cancelled() && (needs.android.result == 'success' || needs.windows.result == 'success' || needs.ios.result == 'success') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: terra-brava-*
+          merge-multiple: true
+          path: dist
+      - name: Publish available builds
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view v1.0-preview >/dev/null 2>&1; then
+            gh release create v1.0-preview --target "$GITHUB_SHA" --title "Terra Brava V1 - testes" --prerelease --notes "Compilacoes experimentais. APK assinado para depuracao; EXE sem assinatura comercial; IPA sem assinatura e requer assinatura valida antes de instalar. Compatibilidade e desempenho em aparelhos reais ainda nao verificados."
+          fi
+          gh release upload v1.0-preview dist/* --clobber
