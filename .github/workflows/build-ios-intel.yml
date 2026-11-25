@@ -1,0 +1,102 @@
+name: Terra Brava - IPA Intel
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/build-ios-intel.yml'
+permissions:
+  contents: write
+jobs:
+  ios:
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare iOS app
+        run: |
+          brew install xcodegen
+          mkdir -p native-ios/www
+          cp index.html style.css *.js manifest.webmanifest native-ios/www/
+          cp -r assets native-ios/www/
+          cp -r ios/Assets.xcassets native-ios/
+          cd native-ios
+          cat > App.swift <<'EOF'
+          import UIKit
+          import WebKit
+          @main
+          class AppDelegate: UIResponder, UIApplicationDelegate {
+            var window: UIWindow?
+            func application(_ application: UIApplication, didFinishLaunchingWithOptions options: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+              let window = UIWindow(frame: UIScreen.main.bounds)
+              window.rootViewController = GameController()
+              window.makeKeyAndVisible()
+              self.window = window
+              application.isIdleTimerDisabled = true
+              return true
+            }
+          }
+          class GameController: UIViewController {
+            override var prefersStatusBarHidden: Bool { true }
+            override var prefersHomeIndicatorAutoHidden: Bool { true }
+            override func loadView() {
+              let config = WKWebViewConfiguration()
+              config.websiteDataStore = .default()
+              config.allowsInlineMediaPlayback = true
+              let web = WKWebView(frame: .zero, configuration: config)
+              web.scrollView.isScrollEnabled = false
+              view = web
+              if let url = Bundle.main.url(forResource: "index", withExtension: "html", subdirectory: "www") {
+                web.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
+              }
+            }
+          }
+          EOF
+          cat > project.yml <<'EOF'
+          name: TerraBrava
+          options:
+            deploymentTarget:
+              iOS: "15.0"
+          targets:
+            TerraBrava:
+              type: application
+              platform: iOS
+              sources:
+                - App.swift
+                - Assets.xcassets
+                - path: www
+                  type: folder
+                  buildPhase: resources
+              info:
+                path: Info.plist
+                properties:
+                  CFBundleDisplayName: Terra Brava
+                  UILaunchScreen: {}
+                  UISupportedInterfaceOrientations:
+                    - UIInterfaceOrientationLandscapeLeft
+                    - UIInterfaceOrientationLandscapeRight
+                  UISupportedInterfaceOrientations~ipad:
+                    - UIInterfaceOrientationLandscapeLeft
+                    - UIInterfaceOrientationLandscapeRight
+                  UIRequiresFullScreen: true
+              settings:
+                base:
+                  PRODUCT_BUNDLE_IDENTIFIER: com.riftsdev.terrabrava
+                  ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+                  SWIFT_VERSION: "5.0"
+                  MARKETING_VERSION: "1.0"
+                  CURRENT_PROJECT_VERSION: "1"
+          EOF
+          xcodegen generate
+      - name: Build unsigned IPA for later signing
+        run: |
+          cd native-ios
+          xcodebuild -project TerraBrava.xcodeproj -scheme TerraBrava -configuration Release -sdk iphoneos -derivedDataPath build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+          mkdir -p Payload ../dist
+          cp -R build/Build/Products/Release-iphoneos/TerraBrava.app Payload/
+          test -f Payload/TerraBrava.app/www/index.html
+          zip -qr ../dist/Terra-Brava-iOS-unsigned.ipa Payload
+      - name: Publish IPA only
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload v1.0-preview dist/Terra-Brava-iOS-unsigned.ipa --clobber
+
