@@ -42,10 +42,11 @@
   ui.ignition.onclick=()=>game('ignition');
   ui.service.onclick=()=>game('service');
   window.addEventListener('keydown',e=>{
-    if(ui.cover.hidden||ui.guide.open)return;
+    if(ui.cover.hidden||document.querySelector('dialog[open]'))return;
+    const items=[ui.coverStart,ui.coverCharacter,ui.coverSettings];
     if(['ArrowDown','ArrowUp','ArrowLeft','ArrowRight'].includes(e.code)){
-      e.preventDefault();(document.activeElement===ui.coverSettings?ui.coverStart:ui.coverSettings).focus();
-    }else if((e.code==='Enter'||e.code==='Space')&&document.activeElement!==ui.coverSettings&&document.activeElement!==ui.coverStart){
+      e.preventDefault();items[(Math.max(0,items.indexOf(document.activeElement))+(['ArrowUp','ArrowLeft'].includes(e.code)?2:1))%3].focus();
+    }else if((e.code==='Enter'||e.code==='Space')&&!items.includes(document.activeElement)){
       e.preventDefault();ui.coverStart.click();
     }
   });
@@ -66,6 +67,7 @@
   function missionOpen(value){ui.hint.hidden=!value;ui.missionToggle.setAttribute('aria-expanded',String(value));}
   ui.missionToggle.onclick=()=>missionOpen(ui.hint.hidden);
   missionOpen(!matchMedia('(pointer:coarse), (max-width:750px)').matches);
+  ui.viewDistance.onchange=()=>game('setDistance',ui.viewDistance.value);
   ui.graphics.onchange=()=>game('setQuality',ui.graphics.value);
   ui.volume.oninput=()=>{game('setVolume',Number(ui.volume.value)/100);text(ui.volumeRead,ui.volume.value+'%');};
   ui.weather.onclick=()=>game('cycleWeather');
@@ -138,11 +140,27 @@
     if(typeof dialog.close==='function')dialog.close();
     else{dialog.removeAttribute('open');resumeDialog();}
   }
+  function interactions(machine,seat,loaded){
+    ui.enterNearby.hidden=!machine;
+    if(machine)text(ui.enterNearby,'Entrar · '+fleet[machine.type].name);
+    ui.sitNearby.hidden=!seat;ui.sitNearby.disabled=!loaded;
+    if(seat)text(ui.sitNearby,'Sentar · '+seat.label);
+    ui.callPhone.disabled=!loaded;
+    openDialog(ui.interactions);
+    ui.interactions.querySelector('button:not([hidden]):not([disabled])').focus();
+  }
+  for(const [button,kind] of [[ui.enterNearby,'enter'],[ui.sitNearby,'sit'],[ui.callPhone,'call']]){
+    button.onclick=()=>{closeDialog(ui.interactions);game('performInteraction',kind);};
+  }
+  ui.closeInteractions.onclick=()=>closeDialog(ui.interactions);
+  ui.interactions.onkeydown=e=>{
+    if(e.code==='KeyE'&&!e.repeat){e.preventDefault();e.stopPropagation();document.activeElement?.click();}
+  };
   function resumeDialog(){
     if(openedDuringPlay&&playing)game('pause',false);openedDuringPlay=false;
     if(previousFocus?.isConnected)previousFocus.focus({preventScroll:true});previousFocus=null;
   }
-  for(const dialog of [ui.guide,ui.mapModal]){
+  for(const dialog of [ui.guide,ui.mapModal,ui.interactions]){
     dialog.addEventListener('close',resumeDialog);
     dialog.addEventListener('click',e=>{
       if(e.target!==dialog)return;
@@ -150,7 +168,7 @@
       if(e.clientX<b.left||e.clientX>b.right||e.clientY<b.top||e.clientY>b.bottom)closeDialog(dialog);
     });
   }
-  function showGuide(){ui.graphics.value=game('getQuality')||'auto';ui.volume.value=Math.round((game('getVolume')??.8)*100);text(ui.volumeRead,ui.volume.value+'%');ui.helpMachine.value=playing ? state?.type||selected : selected;guide();openDialog(ui.guide)}
+  function showGuide(){ui.viewDistance.value=game('getDistance');ui.graphics.value=game('getQuality')||'auto';ui.volume.value=Math.round((game('getVolume')??.8)*100);text(ui.volumeRead,ui.volume.value+'%');ui.helpMachine.value=playing ? state?.type||selected : selected;guide();openDialog(ui.guide)}
   ui.garageHelp.onclick=ui.hudHelp.onclick=showGuide;
   ui.closeGuide.onclick=()=>closeDialog(ui.guide);
   const helpTabs={touch:ui.touchHelp,keys:ui.keyHelp,pad:ui.padHelp};
@@ -179,9 +197,7 @@
     const vertical=arrows?'↑ / ↓':'I / K',horizontal=arrows?'← / →':'J / L';
     const actions=(first,second)=>mirror?second+' / '+first:first+' / '+second;
     const interact=touch?'Sair / Entrar':pad?'A':'E';
-    let body=note(mirror
-      ?'Esquerda fecha e direita abre a concha nos dois esquemas. Espelhado altera os demais eixos hidráulicos.'
-      :(type==='exc'?'Puxe a alavanca direita para erguer a lança. Esquerda fecha e direita abre a concha.':'O esquema anterior restaura o primeiro sentido das ferramentas. A direção e a câmera seguem o sentido de condução.'));
+    let body=note(type==='exc'||type==='back'?'Alavanca direita: frente ergue, trás abaixa, esquerda fecha e direita abre.':'O esquema selecionado define o sentido dos comandos hidráulicos.');
     if(pad){
       body+=block('Gamepad • '+fleet[type].name,[
         ['Menu','Direcional escolhe • A confirma • B fecha o manual. Na lista de máquinas, use ← e →.'],
@@ -199,12 +215,12 @@
     }
     if(!pad)body+=block('Partida e serviço',[[touch?'Ligar motor':'R','Ligar ou desligar o motor. Entre, ligue e só então movimente a máquina.'],[touch?'Aceitar obra / Atender':'V','Perto da placa, aceite a obra. Com a picape parada, reponha no depósito ou transfira junto à máquina.']]);
     body+=block('Entrar, sair e caminhar',[
-      [interact,'Pare a máquina e saia da cabine. A pé, aproxime-se de outra cabine e use o mesmo comando para entrar.'],
+      [interact,'Pare a máquina e saia da cabine. A pé, abra Interações para ligar, usar um assento próximo ou entrar na cabine. Movimente-se para levantar ou encerrar a ligação.'],
       [touch?'Alavancas':pad?'LS / RS':'WASD / mouse',touch||pad?'A esquerda anda em relação à câmera. A direita olha ao redor.':'Caminhe com WASD ou as setas. Arraste o cenário com o mouse para olhar ao redor.']
     ]);
     if(type==='exc'||type==='back'){
       if(type==='back'){
-        body+=block('Pá dianteira · '+nameRight,[[vertical,actions('Abaixar os braços','Erguer os braços')],[horizontal,'Fechar e colher / abrir e despejar']]);
+        body+=block('Pá dianteira · '+nameRight,[[vertical,'Erguer os braços / abaixar os braços'],[horizontal,'Fechar e colher / abrir e despejar']]);
         body+=note((touch?'Toque no botão de implemento':pad?'Pressione Y':'Pressione X')+' com a retroescavadeira parada para alternar entre a pá e o braço traseiro. Os estabilizadores acompanham a troca.');
       }
       body+=block((type==='back'?'Braço traseiro':'Trabalho')+' · '+nameLeft,[
@@ -212,7 +228,7 @@
         [arrows?'← / →':'F / H',actions('Girar à direita','Girar à esquerda')]
       ]);
       body+=block('Escavação · '+nameRight,[
-        [vertical,actions('Abaixar a lança','Erguer a lança')],
+        [vertical,'Erguer a lança / abaixar a lança'],
         [horizontal,'Fechar e recolher / abrir e despejar']
       ]);
       body+=note('Escave em qualquer solo transitável do canteiro. Com a concha cheia em Trabalho, a guia pontilhada mostra onde a terra vai cair e fica verde sobre a carroceria.');
@@ -230,9 +246,8 @@
     if(!map||!canvas.getContext)return;
     const c=canvas.getContext('2d');if(!c)return;
     const w=canvas.width,h=canvas.height;
-    const xx=(map.machines||[]).map(m=>m.x),zz=(map.machines||[]).map(m=>m.z);
-    const minx=large?Math.min(-30,...xx)-4:-22,maxx=large?Math.max(80,...xx)+4:36;
-    const minz=large?Math.min(-23,...zz)-5:-25,maxz=large?Math.max(27,...zz)+5:27;
+    const minx=large?-512:-22,maxx=large?512:36;
+    const minz=large?-512:-25,maxz=large?512:27;
     const scale=Math.min(w/(maxx-minx),h/(maxz-minz))*.9;
     const cx=large?(minx+maxx)/2:map.x;
     const cz=large?(minz+maxz)/2:map.z;
@@ -240,6 +255,13 @@
     c.clearRect(0,0,w,h);c.fillStyle='#202d26';c.fillRect(0,0,w,h);
     c.strokeStyle='#a1b09824';c.lineWidth=1;c.beginPath();
     for(let v=-130;v<=130;v+=10){c.moveTo(X(v),0);c.lineTo(X(v),h);c.moveTo(0,Z(v));c.lineTo(w,Z(v));}c.stroke();
+    for(const path of [...Rural.roads,Rural.trail]){
+      c.strokeStyle=path===Rural.trail?'#839663':'#9b8060';c.lineWidth=large?1.4:2;c.beginPath();
+      path.forEach(([x,z],i)=>i?c.lineTo(X(x),Z(z)):c.moveTo(X(x),Z(z)));c.stroke();
+    }
+    if(large){c.font='11px sans-serif';c.fillStyle='#efe2ca';c.textAlign='left';
+      for(const [label,x,z] of Rural.sites){c.fillRect(X(x)-2,Z(z)-2,4,4);c.fillText(label,X(x)+4,Z(z)-3);}
+    }
     if(map.work){
       for(const [index,done] of map.work.done.entries()){
         const x=map.work.start+index;
@@ -249,7 +271,7 @@
     for(const [key,z] of Object.entries(map.zones||{})){
       if(!zoneStyles[key])continue;const [color,label]=zoneStyles[key],sx=X(z.x),sz=Z(z.z);
       c.fillStyle=color+'37';c.strokeStyle=color;c.setLineDash(large?[5,4]:[3,3]);c.lineWidth=large?1.8:1.45;c.beginPath();c.arc(sx,sz,z.r*scale,0,Math.PI*2);c.fill();c.stroke();c.setLineDash([]);
-      if(large){c.font='bold 16px sans-serif';c.textAlign='center';c.fillStyle=color;c.fillText(label,sx,sz+z.r*scale+16);}
+      if(large&&key==='depot'){c.font='bold 16px sans-serif';c.textAlign='center';c.fillStyle=color;c.fillText(label,sx,sz+z.r*scale+16);}
     }
     for(const m of map.machines||[]){
       const active=m.type===(map.onFoot?'person':state?.type);
@@ -285,12 +307,12 @@
     if(s.type==='pickup'&&!walking)status+=' · Carga '+Math.floor(s.diesel)+' L / '+Math.floor(s.oilCargo)+' L';
     text(ui.statusLine,status+' · '+money);
     if(!walking&&['bike','pickup','truck','grader'].includes(s.type))ui.modeSelector.hidden=true;
-    ui.interact.disabled=walking&&!s.nearMachine;
-    const action=walking?'Entrar':'Sair';
+    ui.interact.disabled=false;
+    const action=walking?(s.action==='sit'?'Levantar':s.action==='call'?'Desligar':'Interagir'):'Sair';
     text(ui.interact.querySelector('span'),action);text(ui.keyInteract,action);
-    ui.interact.setAttribute('aria-label',walking?'Entrar em '+(s.nearMachine||'uma máquina')+' (E)':'Sair da máquina (E)');
+    ui.interact.setAttribute('aria-label',action+' (E)');
     ui.nearCab.hidden=!walking;
-    text(ui.nearCab,s.nearMachine||'Aproxime-se de uma cabine');
+    text(ui.nearCab,s.action==='call'?'Em ligação':s.action==='sit'?'Sentado':s.nearSeat||s.nearMachine||'Interações');
     text(ui.keyMove,walking?'Caminhar':'Dirigir');
     text(ui.hudName,walking?'Operador a pé':f.name);text(ui.speed,Math.round(s.speed||0));text(ui.load,(s.load||0).toFixed(2).replace('.',','));text(ui.rpm,Math.round(s.rpm||0));
     ui.loadWrap.hidden=ui.loadDivider.hidden=!(s.capacity>0);
@@ -321,6 +343,6 @@
     document.body.classList.add('playing');if(document.activeElement?.blur)document.activeElement.blur();
   }
   function notice(message){clearTimeout(toastTimer);text(ui.toast,message);ui.toast.hidden=false;toastTimer=setTimeout(()=>{ui.toast.hidden=true},4400)}
-  window.UI={hud,play,garage,notice,releaseControls};
+  window.UI={interactions,hud,play,garage,notice,releaseControls};
   select('exc');
 })();

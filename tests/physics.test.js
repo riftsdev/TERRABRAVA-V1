@@ -2,8 +2,8 @@
 const fs=require('fs'),assert=require('assert'),path=require('path');
 const src=fs.readFileSync(path.join(__dirname,'..','simulation.js'),'utf8');
 function boot(){const H={f:()=>0},win={};
-  const World={height:(x,z)=>H.f(x,z),collides:()=>false,bounds:{minX:-500,maxX:500,minZ:-500,maxZ:500},zones:{dump:{x:0,z:0,r:1},depot:{x:0,z:0,r:1}},dig:()=>0,deposit:()=>0,grade:()=>0};
-  const Machines={create:()=>({root:{p:[0,0,0],r:[0,0,0]},bladeGroup:{p:[0,0,0]}}),pose(){},tip:m=>[m.root.p[0],m.root.p[1]+.1,m.root.p[2]+2]};
+  const World={height:(x,z)=>H.f(x,z),collides:()=>false,bounds:{minX:-500,maxX:500,minZ:-500,maxZ:500},zones:{dump:{x:0,z:0,r:1},depot:{x:0,z:0,r:1}},dig:()=>0,deposit:()=>0,scoop:()=>({volume:0}),sweepBlade:()=>0};
+  const Machines={create:()=>({root:{p:[0,0,0],r:[0,0,0]},bladeGroup:{p:[0,0,0]}}),pose(){},bucketEdge:()=>[[-.5,0,0],[.5,0,0]],cuttingEdge:()=>[[-1.66,0,0],[1.66,0,0]],tip:m=>[m.root.p[0],m.root.p[1]+.1,m.root.p[2]+2]};
   const Gs={sphere:()=>({visible:false,p:[0,0,0],s:[1,1,1],r:[0,0,0]})};
   new Function('window','World','Machines','G','Obra',src)(win,World,Machines,Gs,{measure(){},restore(){}});
   win.Sim.init({});return{Sim:win.Sim,H,World};}

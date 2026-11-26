@@ -76,7 +76,7 @@
     const k=info[type];
     const v={type,model:Machines.create(type,parent),x:k.x,z:k.z,y:0,heading:k.heading,pitch:0,roll:0,
       running:false,occupied:false,fuel:72,oil:8,dieselCargo:0,oilCargo:0,
-      load:0,capacity:k.capacity,frontLoad:0,rearLoad:0,boom:.52,stick:.65,curl:.13,blade:.57,
+      flow:1,frontFlow:1,rearFlow:1,load:0,capacity:k.capacity,frontLoad:0,rearLoad:0,boom:.52,stick:.65,curl:.13,blade:.57,
       bed:0,frontLift:.05,frontCurl:.10,slew:0,bladeAngle:.05,tool:type==='back'?'front':type==='exc'?'bucket':type==='truck'?'bed':'blade',
       wheelRoll:0,leftTravel:0,rightTravel:0,stabilizers:0,volume:{dug:0,received:0,delivered:0,graded:0}};
     cleanControls(v);ground(v,step,true);pose(v);
@@ -101,8 +101,8 @@
   function toggleTool() {
     const v=selected;
     if(!v||!v.running||v.type!=='back'||Math.abs(v.speed)>.6)return false;
-    v[v.tool+'Load']=v.load; v.tool=v.tool==='front'?'rear':'front';
-    v.capacity=v.tool==='front'?info.back.capacity:.38;v.load=v[v.tool+'Load'];
+    v[v.tool+'Flow']=v.flow;v[v.tool+'Load']=v.load; v.tool=v.tool==='front'?'rear':'front';
+    v.capacity=v.tool==='front'?info.back.capacity:.38;v.load=v[v.tool+'Load'];v.flow=v[v.tool+'Flow'];
     v.axes={lx:0,ly:0,rx:0,ry:0};v.emission=0;pose(v);return true;
   }
   function blocked(v,x,z,h) {
@@ -263,45 +263,43 @@
     const p=local(truck,x,z);
     return Math.abs(p[0])<=1.07+margin && p[1]>=-2.60-margin && p[1]<=1.17+margin;
   }
-  function updateBucket(v,dt,p) {
+  function updateBucket(v,dt,p,before){
     const front=v.type==='back'&&v.tool==='front',a=v.axes;
     v.resist=0;
     if(v.type==='back'&&!front&&v.stabilizers<.82)return;
-    const height=World.height(p[0],p[2]),clearance=p[1]-height;
     const curl=front?v.frontCurl:v.curl;
-    const near=clearance<.32;
-    const cut=Math.max(0,-a.rx)*(curl<.992?1:0);
-    const pull=cut>.035?(front?Math.max(0,v.speed)*.47:Math.max(0,-a.ly)*.53):0;
-    const effort=Math.max(cut,pull);
-    if(near&&effort>.07&&v.load<v.capacity-.00001&&curl>.04){
-      v.resist=clamp(.12+.4*v.load/Math.max(.01,v.capacity),0,.55); // resistência do solo cresce com a concha cheia
-      const engagement=clamp((.37-clearance)/.34,.18,1);
-      const rate=(front?1.20:v.type==='exc'?1.55:.69)*Math.min(effort,1.3)*engagement;
-      const amount=Math.min(v.capacity-v.load,rate*dt);
-      const got=World.dig(p[0],p[2],front?1.22:v.type==='exc'?1.08:.70,amount)||0;
-      if(got>0){
-        v.load+=got; v.volume.dug+=got;history.dug+=got;
-        history.cut=history.dug;
+    // Lowering, crowding the dipper, curling or driving a low loader into a pile
+    // can produce a bite. Command alone cannot remove a stationary patch.
+    const cutting=a.rx<.04&&curl<.985&&(a.rx<-.035||a.ry>.035||
+      (front?v.speed>.08:Math.abs(a.ly)>.035));
+    let collected=0;
+    if(cutting&&v.load<v.capacity-.00001){
+      const bite=World.scoop(before,Machines.bucketEdge(v.model),v.capacity-v.load,wet);
+      collected=bite.volume;
+      if(collected>0){
+        v.flow=(v.flow*v.load+collected*bite.flow)/(v.load+collected);
+        v.load+=collected;v.resist=clamp(bite.resistance+.15*v.load/v.capacity,0,.8);
+        v.volume.dug+=collected;history.dug+=collected;history.cut=history.dug;
       }
     }
     // Material stays in the curled bucket and starts spilling as its mouth opens.
-    if(v.load>.00001&&curl<.60&&a.rx>-.04&&effort<.08){
+    if(v.load>.00001&&curl<.60&&collected===0&&(a.rx>.035||curl<.16&&!cutting)){
       const slope=clamp((.60-curl)/.36,0,1);
       if(slope>.02)spill(v,dt,p,(front?1.55:1.45)*slope,front?0:v.slew,1);
     } else v.emission=0;
-    if(v.type==='back')v[v.tool+'Load']=v.load;
+    if(v.type==='back'){v[v.tool+'Load']=v.load;v[v.tool+'Flow']=v.flow;}
   }
   function spill(v,dt,p,rate,extraAngle,sign) {
     v.emission+=dt;
     if(v.emission<.085)return;
     const free=pieces.find(o=>!o.on);if(!free){v.emission=Math.min(.15,v.emission);return;}
-    const amount=Math.min(v.load,rate*v.emission);v.emission=0;
+    const amount=Math.min(v.load,rate*v.flow*v.emission);v.emission=0;
     if(amount<.000001)return;
     const angle=v.heading+extraAngle+(v.type==='back'&&v.tool==='rear'?Math.PI:0);
     const spread=(next()-.5)*(v.type==='truck'?1.12:.42);
     const forward=sign*(v.type==='truck'?1.0+next()*.35:.32+next()*.38);
     const dx=Math.sin(angle),dz=Math.cos(angle);
-    free.on=true;free.source=v.type;free.tool=v.tool;free.volume=amount;
+    free.flow=v.flow;free.on=true;free.source=v.type;free.tool=v.tool;free.volume=amount;
     free.x=p[0]+dz*spread;free.y=p[1]+.09;free.z=p[2]-dx*spread;
     free.vx=dx*forward+Math.sin(v.heading)*v.speed;free.vz=dz*forward+Math.cos(v.heading)*v.speed;free.vy=-.56;
     free.life=0;free.node.visible=true;
@@ -310,25 +308,16 @@
     free.node.p[0]=free.x;free.node.p[1]=free.y;free.node.p[2]=free.z;
     v.load=Math.max(0,v.load-amount);
   }
-  function updateGrader(v,dt,p) {
-    const speed=Math.abs(v.speed);
-    if(speed<.16||p[1]-World.height(p[0],p[2])>.24)return;
-    const swept=speed*dt,angle=v.heading+v.bladeAngle;
-    const bite=clamp((World.height(p[0],p[2])+.24-p[1])/.28,.06,1);
-    const volume=World.grade(p[0],p[2],1.83,swept*.34*bite,angle)||0;
-    Obra.measure(p[0],p[2],volume);
-    v.volume.graded+=Math.abs(volume);
-    if(!(volume>0))return;
-    // Count a square metre once, wherever the moving blade actually worked soil.
-    v.grading+=swept;
-    if(v.grading<.58)return;
-    v.grading=0;
-    for(const side of [-1,0,1]){
-      const x=p[0]+Math.cos(angle)*side,z=p[2]-Math.sin(angle)*side;
-      const cell=workCell(x,z);
-      if(cell!==null)gradeCells.add(cell);
-    }
-    history.graded=gradeCells.size;
+  function updateGrader(v,dx,dz){
+    // The blade follows the posed carriage, including chassis pitch and roll.
+    // A parked or blocked machine has no swept area, even with throttle applied.
+    if(v.blade>.48||v.tipped||Math.hypot(dx,dz)<.0001)return;
+    const [left,right]=Machines.cuttingEdge(v.model);
+    const moved=World.sweepBlade(left,right,dx,dz,(x,z,volume)=>{
+      Obra.measure(x,z,volume);
+      const cell=workCell(x,z);if(cell!==null)gradeCells.add(cell);
+    });
+    v.volume.graded+=moved;history.graded=gradeCells.size;
   }
   function land(item,truck) {
     const b=World.bounds;
@@ -338,7 +327,7 @@
       [x,z]=point(truck,p[0]<0?-1.7:1.7,p[1]);
     }
     x=clamp(x,b.minX+2,b.maxX-2);z=clamp(z,b.minZ+2,b.maxZ-2);
-    const r=item.source==='truck'?1.22:.88;
+    const r=(item.source==='truck'?1.45:1.2)*(item.flow||1);
     function put(px,pz){
       const amount=Math.min(item.volume,World.deposit(px,pz,r,item.volume)||0);
       item.volume=Math.max(0,item.volume-amount);
@@ -372,6 +361,7 @@
         const lip=truck.y+2.66;
         if(before>=lip-.20&&o.y<=lip+.04&&o.vy<0){
           const received=Math.min(o.volume,Math.max(0,truck.capacity-truck.load));
+          if(received>0)truck.flow=(truck.flow*truck.load+(o.flow||1)*received)/(truck.load+received);
           truck.load+=received;truck.volume.received+=received;history.loaded+=received;
           o.volume-=received;done=o.volume<.000001;
           if(!done&&received>0)done=land(o,truck);
@@ -396,11 +386,13 @@
     }
     const priorLoad=v.load,priorTruckLoad=truck.load;
     const running=v.running&&v.occupied;
+    const before=running&&(v.type==='exc'||v.type==='back')?Machines.bucketEdge(v.model):null;
+    const oldX=v.x,oldZ=v.z;
     const throttle=drive(v,dt,input,running),power=running?hydraulics(v,dt,input):0;
     ground(v,dt);pose(v);
     const p=running?constrainGround(v):toolTip(v);
-    if(running&&(v.type==='exc'||v.type==='back'))updateBucket(v,dt,p);
-    else if(running&&v.type==='grader')updateGrader(v,dt,p);
+    if(running&&(v.type==='exc'||v.type==='back'))updateBucket(v,dt,p,before);
+    else if(running&&v.type==='grader')updateGrader(v,v.x-oldX,v.z-oldZ);
     if(truck.running&&truck.bed>.41&&truck.load>.00001)spill(truck,dt,truck===v?p:toolTip(truck),Math.min(2.8,(truck.bed-.41)*6.5),0,-1);
     particles(dt,truck);
     v.engine=Math.max(throttle,power*.86,Math.min(1,Math.abs(v.speed)/info[v.type].drive));
@@ -463,14 +455,14 @@
     }
     return {stage:3,progress:1,objective:'Serviço concluído',hint:'O canteiro continua aberto para operação livre.'};
   }
-  const ranges={x:[-500,500],z:[-500,500],heading:[-10000,10000],speed:[-12,12],
+  const ranges={x:[-512,512],z:[-512,512],heading:[-10000,10000],speed:[-12,12],
     wheelRoll:[-100,100],boom:[0,1],stick:[0,1],curl:[0,1],blade:[0,1],bed:[0,1],frontLift:[0,1],
     frontCurl:[0,1],slew:[-7,7],bladeAngle:[-.88,.88],stabilizers:[0,1]};
   const numeric=(v,lo,hi)=>Number.isFinite(v)&&v>=lo&&v<=hi;
   const pick=(v,keys)=>Object.fromEntries(keys.map(k=>[k,v[k]]));
   function snapshot(){
-    return {version:1,selected:selected.type,history:{...history},cells:Array.from(gradeCells),machines:fleet.map(v=>({...pick(v,Object.keys(ranges)),type:v.type,fuel:v.fuel,oil:v.oil,dieselCargo:v.dieselCargo,oilCargo:v.oilCargo,tool:v.tool,load:v.load,frontLoad:v.frontLoad,rearLoad:v.rearLoad,leftTravel:v.leftTravel,rightTravel:v.rightTravel,volume:{...v.volume}})),
-      pieces:pieces.filter(o=>o.on).map(o=>pick(o,['source','tool','volume','x','y','z','vx','vy','vz','life']))};
+    return {version:1,selected:selected.type,history:{...history},cells:Array.from(gradeCells),machines:fleet.map(v=>({...pick(v,Object.keys(ranges)),type:v.type,flow:v.flow,frontFlow:v.frontFlow,rearFlow:v.rearFlow,fuel:v.fuel,oil:v.oil,dieselCargo:v.dieselCargo,oilCargo:v.oilCargo,tool:v.tool,load:v.load,frontLoad:v.frontLoad,rearLoad:v.rearLoad,leftTravel:v.leftTravel,rightTravel:v.rightTravel,volume:{...v.volume}})),
+      pieces:pieces.filter(o=>o.on).map(o=>pick(o,['source','tool','flow','volume','x','y','z','vx','vy','vz','life']))};
   }
   function restore(data){
     const {minX,maxX,minZ,maxZ}=World.bounds;
@@ -498,6 +490,7 @@
       const d=data.machines.find(o=>o.type===v.type);
       if(!d)continue;
       cleanControls(v);
+      for(const key of ['flow','frontFlow','rearFlow'])v[key]=numeric(d[key],.5,1.5)?d[key]:1;
       Object.assign(v,pick(d,Object.keys(ranges)),pick(d,['load','frontLoad','rearLoad']));
       for(const [key,max] of [['fuel',100],['oil',10],['dieselCargo',160],['oilCargo',20]]){
         if(numeric(d[key],0,max))v[key]=d[key];
@@ -511,7 +504,8 @@
     pieces.forEach((p,i)=>{
       const d=data.pieces[i];p.on=!!d;p.node.visible=!!d;
       if(!d)return;
-      Object.assign(p,pick(d,['source','tool','volume','x','y','z','vx','vy','vz','life']));
+      Object.assign(p,pick(d,['source','tool','flow','volume','x','y','z','vx','vy','vz','life']));
+      p.flow=numeric(d.flow,.5,1.5)?d.flow:1;
       const size=Math.cbrt(d.volume)*.57;
       p.node.s[0]=size*1.18;p.node.s[1]=size*.91;p.node.s[2]=size;
       p.node.p[0]=p.x;p.node.p[1]=p.y;p.node.p[2]=p.z;

@@ -20,7 +20,8 @@ alavancas de cada máquina, com abas para toque, teclado e gamepad.
 
 J ou analógico direito à ESQUERDA fecha a concha. L ou DIREITA abre.
 Vale para a escavadeira e para as duas conchas da retro (X troca o implemento).
-Na configuração inicial, K abaixa, I levanta, G estende e T recolhe o braço.
+Empurre o analógico direito para a frente (I) para levantar e para trás (K) para abaixar.
+Na configuração inicial, G estende e T recolhe o braço.
 Encoste os dentes, feche e levante. Na escavadeira, estenda o braço e gire
 a torre com F/H até a guia ficar verde sobre a carroceria. Abra para carregar.
 Dirija o basculante até a área de descarga da vila, pare com a traseira dentro

@@ -107,9 +107,9 @@
       }else if(nav&&items.length)items[(index+nav+items.length)%items.length].focus();
       else if(input.interact&&focused?.tagName==='BUTTON')focused.click();
     }else if(!cover.hidden){
-      const items=[document.getElementById('coverStart'),document.getElementById('coverSettings')];
+      const items=[document.getElementById('coverStart'),document.getElementById('coverCharacter'),document.getElementById('coverSettings')];
       let index=items.indexOf(document.activeElement);
-      if(nav){index=index<0?(nav>0?1:0):1-index;items[index].focus();}
+      if(nav){index=(Math.max(0,index)+nav+items.length)%items.length;items[index].focus();}
       if(input.interact)items[Math.max(0,index)].click();
     }else{
       if(nav && fleet && !startButton.disabled){

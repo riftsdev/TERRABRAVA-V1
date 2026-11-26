@@ -12,9 +12,13 @@
   const sticks = {left: [0, 0], right: [0, 0]};
   const keys = new Set();
   let root = null, ready = false, playing = false, paused = false, starting = false;
+  let distance=matchMedia('(pointer:coarse)').matches?64:96;
+  try{const stored=Number(localStorage.getItem('terrabrava.distancia'));if([64,96,160].includes(stored))distance=stored;}catch(_){}
+  function setDistance(v){if([64,96,160].includes(+v)){distance=+v;try{localStorage.setItem('terrabrava.distancia',distance);}catch(_){}}}
   let tipNoticed = false, volume = .8, quality = "auto";
   let frame = 0, lastTime = 0, bank = 0, hudClock = 1, saveClock = 0, dirty = false;
   let mode = 'work', selected = 'exc', footBrake = false, contextLost = false;
+  let phone;
   let onFoot = false, inverted = true;
   try { inverted = localStorage.getItem('terrabrava.hidraulica') !== 'anterior'; } catch (_) {}
   let sounds = true, tier = 0, slowFrames = 0;
@@ -146,14 +150,14 @@
       if (saved && saved.v === 1 && saved.terrain && saved.fleet && World.restore && Sim.restore) {
         // A grade antiga tinha 97 amostras por linha; a expansão foi para leste.
         const terrain=saved.width===129?saved.terrain:saved.terrain.map((v,i)=>i%2?v:v%97+Math.floor(v/97)*129);
-        World.restore(terrain); Sim.restore(saved.fleet); Obra.restore(saved.obra); Atmosphere.restore(saved.atmosphere); World.flush();
+        World.restore(terrain); Rural.restore(saved.rural); World.refreshSurface(); Sim.restore(saved.fleet); Obra.restore(saved.obra); Atmosphere.restore(saved.atmosphere); World.flush();
       }
     } catch (_) { /* Navegação privada e versões antigas podem não ter um turno salvo. */ }
   }
   function save() {
     if (!ready || !dirty || !World.snapshot || !Sim.snapshot) return;
     try {
-      const snapshot = {v: 1, width:129, atmosphere:Atmosphere.snapshot(), obra:Obra.snapshot(), terrain: World.snapshot(), fleet: Sim.snapshot()};
+      const snapshot = {v: 1, width:129, atmosphere:Atmosphere.snapshot(), obra:Obra.snapshot(), terrain: World.snapshot(), rural:Rural.snapshot(), fleet: Sim.snapshot()};
       localStorage.setItem(storageKey, JSON.stringify(snapshot));
       dirty = false;
     } catch (_) { /* O turno continua em memória mesmo sem espaço no dispositivo. */ }
@@ -164,7 +168,7 @@
     root = G.group();
     World.create(root);
     Sim.init(root);
-    Walker.init(root);
+    Walker.init(root);phone=G.box(root,[0,0,0],[.066,.14,.014],'#19232b');phone.visible=false;
     setupContact();
     buildLandingGuide();
     ready = true;
@@ -174,6 +178,7 @@
     if (!frame && playing && !paused && !document.hidden && !contextLost) frame = requestAnimationFrame(loop);
   }
   function start(type) {
+    Operators.ensure().catch(e=>{console.error(e);notice("Falha ao carregar personagem.");});
     if (!types.includes(type) || starting) return;
     startAudio();
     starting = true;
@@ -226,14 +231,24 @@
   function interact() {
     if (!playing || paused) return;
     if (onFoot) {
-      const machine = Walker.enterable(Sim.all());
-      if (!machine) { notice('Aproxime-se de uma cabine para entrar.'); return; }
-      enter(machine.type);
+      const fleet=Sim.all();
+      if(Walker.pos().action){performInteraction('stop');return;}
+      UI.interactions(Walker.enterable(fleet),Walker.nearSeat(fleet),Operators.ready);
     } else {
       if (Math.abs(Sim.active().speed) > .25) { notice('Pare a máquina antes de sair.'); return; }
       if (!Walker.exit(Sim.active(),Sim.all())) { notice('Estacione onde haja espaço ao lado da cabine.'); return; }
       onFoot = true; Sim.occupy(Sim.active(),false); dirty=true; clearInput(); silence(); cam.snap = true; updateHUD();
     }
+  }
+  function performInteraction(kind){
+    if(!playing||!onFoot)return;
+    const fleet=Sim.all();
+    if(kind==='enter'){
+      const m=Walker.enterable(fleet);if(m)enter(m.type);
+      return;
+    }
+    if(!Walker.interact(kind,fleet))notice(kind==='stop'?'A saída do assento está bloqueada.':'Interação indisponível.');
+    updateHUD();
   }
   function setMode(value) {
     if (!playing || onFoot || !['work', 'drive'].includes(value) || mode === value) return;
@@ -298,7 +313,7 @@
     const axis = value => clamp(value, -1, 1);
     const forward = pressed('KeyW','KeyS') + pressed('ArrowUp','ArrowDown');
     const steer = pressed('KeyD','KeyA') + pressed('ArrowRight','ArrowLeft');
-    if (onFoot) return {x:axis(steer+leftX), y:axis(forward+leftY), lookX:axis(rightX), lookY:axis(rightY)};
+    if (onFoot) return {run:keys.has('ShiftLeft')||keys.has('ShiftRight')||Math.hypot(leftX,leftY)>.85,x:axis(steer+leftX), y:axis(forward+leftY), lookX:axis(rightX), lookY:axis(rightY)};
     const hydraulic = value => axis(value) * (inverted ? -1 : 1);
     return {
       drive: axis(forward + (m.type==='exc'?0:pad.triggers) + (drives ? sticks.left[1] : 0)),
@@ -307,7 +322,7 @@
       leftX: hydraulic(pressed('KeyH','KeyF') + ((drives?0:sticks.left[0])+(m.type==='exc'||!drives?pad.leftX:0))),
       leftY: hydraulic(pressed('KeyT','KeyG') + ((drives?0:sticks.left[1])+(m.type==='exc'||!drives?pad.leftY:0))),
       rightX: (m.type==='exc'||m.type==='back'?axis:hydraulic)(pressed('KeyL','KeyJ') + rightX),
-      rightY: hydraulic(pressed('KeyI','KeyK') + rightY),
+      rightY: (m.type==='exc'||m.type==='back')?-axis(pressed('KeyI','KeyK')+rightY):hydraulic(pressed('KeyI','KeyK')+rightY),
       brake: footBrake || keys.has('Space') || pad.brake, mode:m.type==='exc'?'work':mode
     };
   }
@@ -331,7 +346,7 @@
     }
     const terrain=World.soil(pos.x,pos.z),mud=terrain.basin*Atmosphere.state.wet;
     const surface=terrain.sand>.50?'Areia':terrain.gravel>.50?'Brita':mud>.38?'Lama':terrain.cover>.50?'Grama':Atmosphere.state.wet>.16?'Terra úmida':'Terra seca';
-    UI.hud({fps,time:Atmosphere.time(),weather:Atmosphere.label(),surface,running:m.running,fuel:m.fuel,oil:m.oil,diesel:m.dieselCargo,oilCargo:m.oilCargo,work,nearSite,type:m.type,mode,tool:m.tool,onFoot,inverted,nearMachine:near?names[near.type]:null,
+    UI.hud({fps,time:Atmosphere.time(),weather:Atmosphere.label(),surface,running:m.running,fuel:m.fuel,oil:m.oil,diesel:m.dieselCargo,oilCargo:m.oilCargo,work,nearSite,type:m.type,mode,tool:m.tool,onFoot,inverted,action:pos.action,nearSeat:onFoot&&!pos.action&&Walker.nearSeat(Sim.all())?.label,nearMachine:near?names[near.type]:null,
       speed:Math.abs(m.speed)*3.6, load:m.load,capacity:m.capacity,camera:cameraNames[cam.kind],sound:sounds,rpm:Math.round(m.rpm),
       ...obj,map:{work,machines,zones:World.zones,onFoot,heading:pos.heading,x:pos.x,z:pos.z}});
   }
@@ -392,6 +407,7 @@
   }
   function draw(dt) {
     const m = Sim.active(), walkView=onFoot?Walker.view():null;
+    const focus=onFoot?Walker.pos():m;World.stream(focus.x,focus.z,distance);
     const view=walkView?[walkView.eye,walkView.target,58]:getCamera(m,dt);
     if(onFoot) guide.root.visible=false; else updateLandingGuide(m);
     const f = cam.snap || cam.kind === 2 ? 1 : ease(8, dt);
@@ -404,7 +420,7 @@
       const filter='brightness('+brightness.toFixed(2)+') saturate('+(1-.48*(1-env.daylight)).toFixed(2)+')';
       if(canvas.style.filter!==filter)canvas.style.filter=filter;
     }
-    G.draw(root, cam.eye, cam.target, {env,quality,lamp:m,fov: view[2], pixelRatio: Math.min(window.devicePixelRatio || 1, maxRatio), shadows: tier < 2, shadowRange: 32, contactShadows: contactShadows()});
+    G.draw(root, cam.eye, cam.target, {far:distance+36,operator:Operators.frame(m,onFoot,cam.kind,dt,Walker.pos(),phone),env,quality,lamp:m,fov: view[2], pixelRatio: Math.min(window.devicePixelRatio || 1, maxRatio), shadows: tier < 2, shadowRange: 32, contactShadows: contactShadows()});
   }
 
   let fpsFrames=0,fpsElapsed=0,fps=null;
@@ -423,6 +439,7 @@
     Atmosphere.step(dt);Sim.setWet(Atmosphere.state.wet);
     const pad = Pad.poll();
     if (pad.interact) interact();
+    if(paused)return;
     if (pad.mode) setMode(mode === 'drive' ? 'work' : 'drive');
     if (pad.camera) cycleCamera();
     if (pad.ignition) ignition();
@@ -451,7 +468,7 @@
     requestFrame();
   }
 
-  const keyCodes = new Set(['KeyW','KeyS','KeyA','KeyD','KeyI','KeyK','KeyJ','KeyL','KeyF','KeyH','KeyT','KeyG','Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','KeyC','KeyM','KeyX','KeyE','KeyR','KeyV','KeyN','KeyP']);
+  const keyCodes = new Set(['ShiftLeft','ShiftRight','KeyW','KeyS','KeyA','KeyD','KeyI','KeyK','KeyJ','KeyL','KeyF','KeyH','KeyT','KeyG','Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','KeyC','KeyM','KeyX','KeyE','KeyR','KeyV','KeyN','KeyP']);
   window.addEventListener('keydown', e => {
     if (!playing || paused || e.metaKey || e.ctrlKey || e.altKey || !keyCodes.has(e.code)) return;
     if (e.code === 'Space' && e.target instanceof HTMLButtonElement && !e.repeat) e.target.blur();
@@ -507,5 +524,5 @@
   try { sounds = localStorage.getItem('terrabrava.som') !== '0'; } catch (_) {}
   try{const stored=localStorage.getItem('terrabrava.volume');if(stored!==null)volume=clamp(Number(stored)||0,0,1);}catch(_){}
   try{if(localStorage.getItem('terrabrava.qualidade')==='leve')quality='leve';}catch(_){}
-  window.Game = {start, ignition,service, garage, interact, toggleInversion, isInverted:()=>inverted, setMode, setStick, toggleTool, cycleCamera, cycleWeather, nextTime, setQuality, getQuality:()=>quality,setVolume, getVolume:()=>volume, toggleSound, setBrake(value) { footBrake = !!value; }, pause};
+  window.Game = {setDistance,getDistance:()=>distance,start, ignition,service, garage, interact, performInteraction, toggleInversion, isInverted:()=>inverted, setMode, setStick, toggleTool, cycleCamera, cycleWeather, nextTime, setQuality, getQuality:()=>quality,setVolume, getVolume:()=>volume, toggleSound, setBrake(value) { footBrake = !!value; }, pause};
 })();

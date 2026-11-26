@@ -7,7 +7,8 @@
   const axis=v=>Number.isFinite(v)?clamp(v,-1,1):0;
   // Body half width, rear and front extents, longitudinal position of the cab.
   const shapes={exc:[1.40,-1.97,1.84,.55],back:[1.16,-2.04,2.03,-.12],grader:[1.24,-3.28,3.65,-1.14],truck:[1.27,-2.85,3.94,2.45],bike:[.36,-1.1,1.13,0],pickup:[.95,-2.25,2.25,.45]};
-  const radius=.25;
+  let action=null,seat=null;
+  const radius=.27;let movementSpeed=0;
   let actor,body,torso,arms=[],legs=[],on=false,lastFleet=[];
   let x=0,y=0,z=0,heading=0,yaw=0,pitch=.30,vx=0,vz=0,phase=0,amplitude=0;
   const groupAt=(p,xyz)=>{const g=G.group(p);g.p=xyz;return g;};
@@ -70,8 +71,8 @@
     const q=local(m,px,pz),lx=Math.max(0,Math.abs(q[0])-sh[0]),lz=Math.max(sh[1]-q[1],q[1]-sh[2],0);
     return lx*lx+lz*lz<r*r;
   }
-  function blocked(px,pz,fleet,oldHeight){
-    if(World.collides(px,pz,radius))return true;
+  function blocked(px,pz,fleet,oldHeight,ignored=null){
+    if(World.collides(px,pz,radius,ignored))return true;
     const surface=World.height(px,pz);
     if(!Number.isFinite(surface)||(oldHeight!==undefined&&surface>oldHeight+.185))return true;
     for(const m of fleet){
@@ -99,6 +100,7 @@
   }
   function animate(dt,distance){
     const speed=dt>0?distance/dt:0,weight=clamp(speed/2.8,0,1);
+    movementSpeed=speed;body.visible=!window.Operators?.ready;
     amplitude+= (weight-amplitude)*ease(11,dt);phase=(phase+distance*5.9)%(Math.PI*2);
     body.p[1]=.017*amplitude*(1-Math.cos(phase*2));torso.r[2]=.032*amplitude*Math.sin(phase);
     for(const q of legs){
@@ -115,7 +117,11 @@
   }
   function exit(m,fleet){
     if(!actor||!m||!Array.isArray(fleet)||Math.abs(m.speed||0)>.25)return false;
-    const candidate=doors(m).find(d=>!blocked(d.pos[0],d.pos[1],fleet));
+    const others=fleet.filter(v=>v!==m);
+    const candidate=doors(m).find(d=>{
+      const [px,pz]=d.pos;
+      return !blocked(px,pz,fleet)&&clearRoute(m.x,m.z,px,pz,others);
+    });
     if(!candidate)return false;
     [x,z]=candidate.pos;y=World.height(x,z);vx=vz=phase=amplitude=0;
     const actualSide=local(m,x,z)[0]<0?-1:1;
@@ -123,28 +129,70 @@
     lastFleet=fleet;on=true;actor.visible=true;animate(0,0);return true;
   }
   function enterable(fleet){
-    if(!on)return null;
+    if(!on||action)return null;
     let dist=1.65,nearest=null;
     for(const m of fleet){
       if(Math.abs(m.speed||0)>.25||Math.hypot(m.x-x,m.z-z)>6)continue;
       for(const d of doors(m)){
         const away=Math.hypot(x-d.pos[0],z-d.pos[1]);if(away>=dist)continue;
         // The route from the operator to the step cannot cross a wall or another machine.
-        const mx=(d.pos[0]+x)*.5,mz=(d.pos[1]+z)*.5;
-        if(World.collides(mx,mz,.12)||fleet.some(o=>o!==m&&bodyHit(o,mx,mz,.13)))continue;
+        if(!clearRoute(x,z,d.pos[0],d.pos[1],fleet))continue;
         dist=away;nearest=m;
       }
     }
     return nearest;
+  }
+  function clearRoute(ax,az,bx,bz,fleet,ignored=null){
+    const steps=Math.max(1,Math.ceil(Math.hypot(bx-ax,bz-az)/.12));
+    let h=World.height(ax,az);
+    for(let i=1;i<=steps;i++){
+      const px=ax+(bx-ax)*i/steps,pz=az+(bz-az)*i/steps;
+      if(blocked(px,pz,fleet,h,ignored))return false;
+      h=World.height(px,pz);
+    }
+    return true;
+  }
+  function nearSeat(fleet){
+    if(!on||action)return null;
+    let nearest=null,limit=1.15;
+    for(const s of World.seats){
+      const front=s.z+.81,dist=Math.hypot(x-s.x,z-front);
+      if(z<s.z+.36||dist>limit||Math.abs(World.height(s.x,front)+.47-s.y)>.24)continue;
+      if(clearRoute(x,z,s.x,front,fleet)&&clearRoute(s.x,front,s.x,s.z,fleet,s.collider)){nearest=s;limit=dist;}
+    }
+    return nearest;
+  }
+  function interact(kind,fleet){
+    if(!on)return false;
+    if(kind==='stop'){
+      if(!action)return false;
+      if(seat){
+        const landing=[0,.34,-.34].map(dx=>[seat.x+dx,seat.z+.81]).find(([px,pz])=>
+          !blocked(px,pz,fleet)&&clearRoute(x,z,px,pz,fleet,seat.collider));
+        if(!landing)return false;
+        [x,z]=landing;y=World.height(x,z);
+      }
+      action=seat=null;
+    }else{
+      if(action||!window.Operators?.ready)return false;
+      if(kind==='sit'){
+        const target=nearSeat(fleet);if(!target)return false;
+        seat=target;x=seat.x;z=seat.z;y=seat.y;heading=0;
+      }else if(kind!=='call')return false;
+      action=kind;
+    }
+    vx=vz=0;animate(0,0);return true;
   }
   function update(dt,input={},fleet=[]){
     if(!on||!Number.isFinite(dt)||dt<=0)return;
     dt=Math.min(.1,dt);lastFleet=fleet;
     yaw=wrap(yaw-axis(input.lookX)*dt*2.35);pitch=clamp(pitch-axis(input.lookY)*dt*1.1,-.06,.94);
     let ix=-axis(input.x),iz=axis(input.y),norm=Math.hypot(ix,iz);
+    if(action && (norm<.12||!interact('stop',fleet)))return;
     if(norm>1){ix/=norm;iz/=norm;}
     const s=Math.sin(yaw),c=Math.cos(yaw),rate=ease(norm>.02?10:14,dt);
-    vx+=((c*ix+s*iz)*2.75-vx)*rate;vz+=((-s*ix+c*iz)*2.75-vz)*rate;
+    const pace=input.run?3.65:1.55;
+    vx+=((c*ix+s*iz)*pace-vx)*rate;vz+=((-s*ix+c*iz)*pace-vz)*rate;
     const ox=x,oz=z,groundY=World.height(x,z);
     const nx=x+vx*dt,nz=z+vz*dt;
     if(!blocked(nx,nz,fleet,groundY)){x=nx;z=nz;}
@@ -157,12 +205,12 @@
     animate(dt,travel);
   }
   function view(){
-    const target=[x,y+1.12,z],s=Math.sin(yaw),c=Math.cos(yaw);
+    const target=[x,y+(seat?.65:1.16),z],s=Math.sin(yaw),c=Math.cos(yaw);
     const horizontal=4.0*Math.cos(pitch),vertical=4.0*Math.sin(pitch)+.22;
     let fraction=1;
     for(let j=1;j<=14;j++){
       const f=j/14,px=x-s*horizontal*f,pz=z-c*horizontal*f,h=target[1]+vertical*f;
-      if(h<World.height(px,pz)+.18||World.collides(px,pz,.10)||lastFleet.some(m=>h<m.y+3.3&&bodyHit(m,px,pz,.10))){
+      if(h<World.height(px,pz)+.18||World.collides(px,pz,.10,null,h)||lastFleet.some(m=>h<m.y+3.3&&bodyHit(m,px,pz,.10))){
         fraction=Math.max(.13,(j-1)/14);break;
       }
     }
@@ -170,6 +218,6 @@
     return {eye:[ex,Math.max(World.height(ex,ez)+.20,target[1]+vertical*fraction),ez],target};
   }
   function rotate(dx,dy){if(!on)return;yaw=wrap(yaw-(Number.isFinite(dx)?dx:0)*.007);pitch=clamp(pitch+(Number.isFinite(dy)?dy:0)*.006,-.06,.94);}
-  function hide(){on=false;if(actor)actor.visible=false;vx=vz=0;}
-  window.Walker={init,exit,enterable,update,view,rotate,hide,pos:()=>({x,z,heading})};
+  function hide(){action=seat=null;on=false;if(actor)actor.visible=false;vx=vz=0;}
+  window.Walker={init,exit,enterable,nearSeat,interact,update,view,rotate,hide,pos:()=>({x,y,z,heading,action,speed:movementSpeed})};
 })();

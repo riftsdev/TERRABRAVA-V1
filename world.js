@@ -3,7 +3,7 @@ window.World = (() => {
   "use strict";
   const zones = {sand:{x:-14,z:10,r:7},gravel:{x:23,z:-6,r:6},cut:{x:0,z:4,r:9},dump:{x:68,z:-13,r:5},depot:{x:-16,z:-15,r:5},contract:{x:6,z:-13,r:4},grade:{x:14,z:-14,r:8}};
   const W=128, D=80, STEP=1, TILE=16, X0=-48, Z0=-40;
-  const bounds=Object.freeze({minX:X0,maxX:X0+W*STEP,minZ:Z0,maxZ:Z0+D*STEP});
+  const bounds=Object.freeze(Rural.bounds);
   const n=(W+1)*(D+1), heights=new Float32Array(n), original=new Float32Array(n);
   const baseColors=new Float32Array(n*3), tiles=[], obstacles=[], dirty=new Set();
   let parent, solids, noiseSeed=38194;
@@ -57,7 +57,7 @@ window.World = (() => {
     const k=i+W+2;
     return arr[k]+(arr[k-1]-arr[k])*(1-f)+(arr[k-W-1]-arr[k])*(1-g);
   }
-  const height=(x,z)=>sample(x,z);
+  const height=(x,z)=>Rural.yard(x,z)?sample(x,z):Rural.height(x,z);
   const color=(r,g,b)=>[r/255,g/255,b/255];
   const blend=(a,b,t)=>[mix(a[0],b[0],t),mix(a[1],b[1],t),mix(a[2],b[2],t)];
   const clay=color(171,117,76), grit=color(189,149,105), greenColor=color(116,124,77);
@@ -82,8 +82,9 @@ window.World = (() => {
   const sand = new Float32Array(n), gravel = new Float32Array(n);
   const materialPixels = new Uint8Array(n * 4);
   function soil(x,z) {
+    if(!Rural.yard(x,z))return Rural.soil(x,z);
     const basin = sample(x,z,retention), cover = sample(x,z,grass);
-    return {basin,cover,sand:sample(x,z,sand),gravel:sample(x,z,gravel)};
+    return {basin,cover:Rural.bare(x,z)?0:cover,sand:sample(x,z,sand),gravel:sample(x,z,gravel)};
   }
   function bakeMaterial(i,x,z) {
     const road = roadDistance(x,z);
@@ -118,10 +119,10 @@ window.World = (() => {
     tile.node._geom.soil=true;
     tiles[tx+tz*(W/TILE)]=tile;
   }
-  function flag(ix,iz){
+  function flag(ix,iz,set=dirty){
     const tx=Math.floor(ix/TILE), tz=Math.floor(iz/TILE);
     for(let z=(iz%TILE===0?tz-1:tz);z<=tz;z++)for(let x=(ix%TILE===0?tx-1:tx);x<=tx;x++)
-      if(x>=0&&z>=0&&x<W/TILE&&z<D/TILE)dirty.add(x+z*(W/TILE));
+      if(x>=0&&z>=0&&x<W/TILE&&z<D/TILE)set.add(x+z*(W/TILE));
   }
   function samples(x,z,rad){
     rad=Math.max(1.05,rad);
@@ -130,31 +131,141 @@ window.World = (() => {
     const back=Math.max(1,Math.ceil((z-rad-Z0)/STEP)),front=Math.min(D-1,Math.floor((z+rad-Z0)/STEP));
     for(let iz=back;iz<=front;iz++)for(let ix=left;ix<=right;ix++){
       const dx=X0+ix*STEP-x,dz=Z0+iz*STEP-z,d=(dx*dx+dz*dz)/(rad*rad);
-      if(d<1)hits.push({ix,iz,i:ix+iz*(W+1),dx,dz,w:(1-d)**1.2});
+      if(d<1&&!obstacles.some(o=>o.foundation&&Math.abs(X0+ix-o.x)<=o.hw+1&&Math.abs(Z0+iz-o.z)<=o.hd+1))hits.push({ix,iz,i:ix+iz*(W+1),dx,dz,w:(1-d)**1.2});
     }
     return hits;
   }
+  const materialRows=new Map(),bladeTiles=new Set();
+  let lastBladeFlush=0;
+  function pixel(i,x,z){
+    const green=Rural.bare(x,z)?0:Math.round(grass[i]*255);
+    if(materialPixels[i*4+1]===green)return;
+    materialPixels[i*4+1]=green;
+    const row=z-Z0,col=x-X0,span=materialRows.get(row);
+    if(span){span[0]=Math.min(span[0],col);span[1]=Math.max(span[1],col);}
+    else materialRows.set(row,[col,col]);
+  }
+  function uploadMaterial(gl){
+    for(const [row,[a,b]] of materialRows){
+      const start=(row*(W+1)+a)*4;
+      gl.texSubImage2D(gl.TEXTURE_2D,0,a,row,b-a+1,1,gl.RGBA,gl.UNSIGNED_BYTE,materialPixels.subarray(start,start+(b-a+1)*4));
+    }
+    materialRows.clear();
+  }
+  function refreshSurface(){
+    for(let i=0;i<n;i++)pixel(i,X0+i%(W+1),Z0+Math.floor(i/(W+1)));
+    for(const tile of tiles)updateTile(tile);
+  }
+  function soilRoom(x,z,dir){
+    if(!Rural.yard(x,z))return Rural.bladeRoom(x,z,dir);
+    if(obstacles.some(o=>o.foundation&&Math.abs(x-o.x)<=o.hw+1&&Math.abs(z-o.z)<=o.hd+1))return 0;
+    const i=x-X0+(z-Z0)*(W+1),delta=heights[i]-original[i];
+    return dir>0?7-delta:3+delta;
+  }
+  function changeSoil(x,z,delta){
+    Rural.expose(x,z);
+    if(!Rural.yard(x,z)){Rural.bladeChange(x,z,delta);return;}
+    const ix=x-X0,iz=z-Z0,i=ix+iz*(W+1);heights[i]+=delta;
+    flag(ix,iz,bladeTiles);pixel(i,x,z);
+    if(!ix||ix===W||!iz||iz===D)Rural.mark(x,z);
+  }
+  // Integrate the cutting edge over actual travel. Each metre lattice vertex
+  // represents one square metre in the triangulated heightfield.
+  function sweepBlade(left,right,dx,dz,onCut){
+    const ex=right[0]-left[0],ez=right[2]-left[2],width=Math.hypot(ex,ez),travel=Math.hypot(dx,dz);
+    if(!width||!travel)return 0;
+    const area=Math.abs(ex*dz-ez*dx);
+    if(area<1e-7)return 0;
+    const tx=ex/width,tz=ez/width,fx=dx/travel,fz=dz/travel;
+    const oblique=tx*fx+tz*fz,side=oblique>0?-1:1;
+    const cuts=new Map(),fills=new Map(),lanes=Math.ceil(width/.18),steps=Math.max(1,Math.ceil(travel/.18));
+    for(let j=0;j<steps;j++)for(let i=0;i<lanes;i++){
+      const u=(i+.5)/lanes,t=(j+.5)/steps;
+      const px=left[0]+ex*u-dx*t,pz=left[2]+ez*u-dz*t;
+      const depth=height(px,pz)-(left[1]+(right[1]-left[1])*u);
+      if(depth<=0)continue;
+      const x=Math.round(px),z=Math.round(pz),key=x+','+z;
+      let q=cuts.get(key);
+      if(!q){q={x,z,volume:0,room:soilRoom(x,z,-1)};cuts.set(key,q);}
+      const v=Math.min(q.room-q.volume,Math.min(.30,depth)*area/(steps*lanes));
+      if(v<=0)continue;q.volume+=v;
+      // A square blade pushes ahead. Yaw progressively channels the load
+      // towards the trailing tip, reversing discharge when backing up.
+      const lateral=Math.min(1,Math.abs(oblique)*1.9);
+      const tip=side>0?right:left;
+      const targetX=mix(px+fx*1.35,tip[0]+side*tx*1.05,lateral);
+      const targetZ=mix(pz+fz*1.35,tip[2]+side*tz*1.05,lateral);
+      const a=Math.floor(targetX),b=Math.floor(targetZ);
+      for(let k=0;k<4;k++){
+        const bx=a+(k&1),bz=b+(k>>1),w=(1-Math.abs(targetX-bx))*(1-Math.abs(targetZ-bz));
+        if(w<=0)continue;const id=bx+','+bz;
+        const dst=fills.get(id);if(dst)dst.volume+=v*w;else fills.set(id,{x:bx,z:bz,volume:v*w});
+      }
+    }
+    let requested=0,accepted=0;
+    for(const q of cuts.values())requested+=q.volume;
+    if(!requested)return 0;
+    for(const [id,q] of fills){
+      q.volume=cuts.has(id)?0:Math.max(0,Math.min(q.volume,soilRoom(q.x,q.z,1)));
+      accepted+=q.volume;
+    }
+    if(accepted<1e-9)return 0;
+    // Debit only the material that can actually fit at the discharge cells.
+    const fraction=accepted/requested;
+    for(const q of cuts.values())if(q.volume>0){
+      const v=q.volume*fraction;changeSoil(q.x,q.z,-v);if(onCut)onCut(q.x,q.z,v);
+    }
+    for(const q of fills.values())if(q.volume>0)changeSoil(q.x,q.z,q.volume);
+    return accepted;
+  }
   function moveSoil(x,z,rad,volume,direction){
     if(!(volume>0&&Number.isFinite(volume)))return 0;
-    const hits=samples(x,z,rad);let moved=0,rest=volume;
-    for(let pass=0;pass<4&&rest>.000001;pass++){
-      let weights=0;
-      for(const q of hits){
-        const room=direction>0?original[q.i]+7-heights[q.i]:heights[q.i]-(original[q.i]-3);
-        q.room=Math.max(0,room)*STEP*STEP;
-        if(q.room>.000001)weights+=q.w;
-      }
-      if(weights<.000001)break;
-      let step=0;
-      for(const q of hits)if(q.room>.000001){
-        const v=Math.min(q.room,rest*q.w/weights),old=heights[q.i];
-        heights[q.i]+=direction*v/(STEP*STEP);
-        const net=Math.abs(heights[q.i]-old)*STEP*STEP;
-        if(net){flag(q.ix,q.iz);step+=net;}
-      }
-      moved+=step;rest-=step;
+    rad=Math.max(1.05,rad);
+    const hits=[];let weight=0;
+    for(let b=Math.ceil(z-rad);b<=z+rad;b++)for(let a=Math.ceil(x-rad);a<=x+rad;a++){
+      const w=1-((x-a)**2+(z-b)**2)/(rad*rad);if(w<=0)continue;
+      const room=soilRoom(a,b,direction);if(room<1e-7)continue;
+      hits.push({a,b,w,room});weight+=w;
     }
-    return moved;
+    let rest=volume;
+    while(rest>1e-7&&weight>1e-8){
+      const unit=rest/weight;weight=0;
+      for(const q of hits){
+        if(q.room<=0)continue;
+        const take=Math.min(q.room,q.w*unit);q.room-=take;
+        changeSoil(q.a,q.b,take*direction);rest-=take;
+        if(q.room>0)weight+=q.w;
+      }
+    }
+    return volume-Math.max(0,rest);
+  }
+  // Integrate short strips across the teeth and debit only the volume that fits.
+  function scoop(before,after,capacity,wet){
+    const width=Math.hypot(...after[0].map((v,i)=>v-after[1][i]));
+    const lanes=Math.max(2,Math.ceil(width/.24));
+    let volume=0,flow=0,resistance=0;
+    const bites=[];
+    for(let i=0;i<lanes;i++){
+      const u=(i+.5)/lanes;
+      const p=after[0].map((v,k)=>mix(v,after[1][k],u));
+      const old=before[0].map((v,k)=>mix(v,before[1][k],u));
+      const dx=p[0]-old[0],dy=p[1]-old[1],dz=p[2]-old[2];
+      const depth=Math.min(.32,height(p[0],p[2])-p[1]);
+      if(depth<=0)continue;
+      const soilHere=soil(p[0],p[2]),mud=wet*soilHere.basin;
+      const drag=clamp(.26+.30*soilHere.gravel-.15*soilHere.sand+.31*mud,.08,.85);
+      const loose=clamp(1+.40*soilHere.sand-.17*soilHere.gravel-.45*mud,.52,1.4);
+      const swept=width/lanes*(Math.hypot(dx,dz)*depth+Math.max(0,-dy)*Math.min(.35,depth+.08));
+      const amount=swept*(1-drag);
+      if(amount>1e-8){bites.push({x:p[0]-dx*.5,z:p[2]-dz*.5,amount,loose,drag});volume+=amount;}
+    }
+    const fraction=volume?Math.min(1,capacity/volume):0;
+    volume=0;
+    for(const b of bites){
+      const got=moveSoil(b.x,b.z,.6,b.amount*fraction,-1);
+      volume+=got;flow+=got*b.loose;resistance+=got*b.drag;
+    }
+    return {volume,flow:volume?flow/volume:1,resistance:volume?resistance/volume:0};
   }
   function grade(x,z,rad,volume,angle=0){
     if(!(volume>0&&Number.isFinite(volume)))return 0;
@@ -180,19 +291,29 @@ window.World = (() => {
       const i=t.shade[j], delta=heights[i]-original[i];
       t.pos[j*3+1]=heights[i];
       const factor=1-Math.min(.28,Math.abs(Math.min(0,delta))*.14)-Math.min(.07,Math.max(0,delta)*.06);
-      for(let k=0;k<3;k++)t.colors[j*3+k]=baseColors[i*3+k]*factor;
+      const exposed=Rural.bare(t.pos[j*3],t.pos[j*3+2]);
+      const earth=exposed&&sand[i]+gravel[i]<.4;
+      for(let k=0;k<3;k++)t.colors[j*3+k]=(earth?clay[k]:baseColors[i*3+k])*factor;
     }
     G.updateMesh(t.node,t.pos,t.indices,'#ffffff',t.colors);
+    if(t.foliage)refreshGrass(t);
     if(t.mn){
       t.mp.length=0;
       for(const p of t.marks){
-        const surface=height(p[0],p[1]),erased=p[3]&&Math.abs(surface-p[4])>.12;
+        const surface=height(p[0],p[1]),erased=p[3]&&(Rural.bare(p[0],p[1])||Math.abs(surface-p[4])>.12);
         t.mp.push(p[0],surface+p[2]-(erased?.13:0),p[1]);
       }
       G.updateMesh(t.mn,t.mp,t.mi,'#ffffff',t.mc);
     }
   }
-  function flush(){ for(const id of dirty)updateTile(tiles[id]);dirty.clear(); }
+  function flush(){
+    const now=performance.now();
+    if(bladeTiles.size&&now-lastBladeFlush>=75){
+      for(const id of bladeTiles)dirty.add(id);
+      bladeTiles.clear();lastBladeFlush=now;
+    }
+    for(const id of dirty)updateTile(tiles[id]);dirty.clear();
+  }
   function mark(points,c,lift=.024,erases=true){
     let x=0,z=0;for(const a of points){x+=a[0]/points.length;z+=a[1]/points.length;}
     const t=tiles[clamp(Math.floor((x-X0)/TILE),0,W/TILE-1)+clamp(Math.floor((z-Z0)/TILE),0,D/TILE-1)*(W/TILE)];
@@ -238,10 +359,12 @@ window.World = (() => {
   }
   const box=(p,x,y,z,w,h,d,c)=>G.box(p,[x,y,z],[w,h,d],c);
   function circularObstacle(x,z,r){obstacles.push({x,z,r});}
-  function rectObstacle(x,z,w,d){obstacles.push({x,z,hw:w/2,hd:d/2});}
-  function collides(x,z,r=.5){
-    if(x-r<X0+1.4||x+r>X0+W-1.4||z-r<Z0+1.4||z+r>Z0+D-1.4)return true;
+  function rectObstacle(x,z,w,d){obstacles.push({x,z,hw:w/2,hd:d/2,foundation:true});}
+  function collides(x,z,r=.5,ignored=null,cameraHeight=-Infinity){
+    if(x-r<bounds.minX||x+r>bounds.maxX||z-r<bounds.minZ||z+r>bounds.maxZ||Rural.collides(x,z,r))return true;
+    if(x<X0-r-5||x>X0+W+r+5||z<Z0-r-5||z>Z0+D+r+5)return false;
     for(const o of obstacles){
+      if(o===ignored||cameraHeight>o.top)continue;
       if(o.r){if(Math.hypot(x-o.x,z-o.z)<o.r+r)return true;}
       else if(Math.hypot(Math.max(0,Math.abs(x-o.x)-o.hw),Math.max(0,Math.abs(z-o.z)-o.hd))<r)return true;
     }
@@ -255,57 +378,6 @@ window.World = (() => {
       emit(){return ix.length?G.mesh(solids,p,ix,'#ffffff',colors):null;}
     };
   }
-  function landscape(){
-    const m=meshBuilder(), count=100, rings=[40,55,64,82,108,138,190,270];
-    const grid=[], coords=[], cols=[color(119,132,85),color(105,126,87),color(105,129,91),color(107,135,108),color(104,132,122),color(116,145,141),color(136,157,158),color(155,172,171)];
-    for(let j=0;j<rings.length;j++){
-      const ring=[], points=[];
-      for(let i=0;i<count;i++){
-        const a=i/count*Math.PI*2, co=Math.cos(a),si=Math.sin(a);
-        const edgeDist=Math.min((co>0?80:48)/(Math.abs(co)+.00001),40/(Math.abs(si)+.00001));
-        const rad=j===0?edgeDist*.992:edgeDist+rings[j]-40;
-        const x=rad*co,z=rad*si,base=ground(edgeDist*.992*co,edgeDist*.992*si);
-        const hills=fbm(x*.035+j*4,z*.035+j*2), fac=Math.sin(a*3.0+j*.64)*.5+.5;
-        const relief=[0,4.4,1.7,12,18,15,28,12][j];
-        const y=j===0?base-.12:mix(base,3,Math.min(1,j*.33))+relief*(.24+hills*1.09)+fac*[0,1.3,.8,4.5,9,5,14,6][j];
-        ring.push(m.v(x,y,z,cols[j].map(v=>v*(.89+hills*.20))));points.push([x,y,z]);
-      }
-      grid.push(ring);coords.push(points);
-    }
-    for(let j=1;j<rings.length;j++)for(let i=0;i<count;i++){
-      const k=(i+1)%count;
-      m.face(grid[j-1][i],grid[j-1][k],grid[j][i]);
-      m.face(grid[j-1][k],grid[j][k],grid[j][i]);
-      if(j>0&&j<5&&hash(i*.25,j*3.7)>.61){
-        // Distant groves use a single canopy silhouette and share the ridge mesh.
-        const a=coords[j-1][i],b=coords[j-1][k],c=coords[j][i];
-        for(let q=0;q<3;q++){
-          let u=hash(i+q*4.4,j*8.1),v=hash(i*6.2,j+q*2.8);if(u+v>1){u=1-u;v=1-v;}
-          const xyz=a.map((val,axis)=>val+(b[axis]-val)*u+(c[axis]-val)*v);
-          const [x,y,z]=xyz,h=2.3+hash(i*3.72+q,j*5.7)*3.9,r=h*.28;
-          const col=blend(color(72,104,75),color(92,120,89),hash(i,j+q));
-          const bark=color(96,91,72), foot=[], stem=[], lower=[], upper=[];
-          const tip=m.v(x+.16*r,y+h,z-.09*r,col.map(t=>t*1.08));
-          for(let k=0;k<5;k++){
-            const aa=k*2*Math.PI/5+u, cx=Math.cos(aa), cz=Math.sin(aa);
-            foot.push(m.v(x+cx*r*.10,y-.32,z+cz*r*.10,bark));
-            stem.push(m.v(x+cx*r*.08,y+h*.50,z+cz*r*.08,bark));
-            lower.push(m.v(x+cx*r*(.86+.13*v),y+h*(.36+.05*cx),z+cz*r,col.map(t=>t*.84)));
-            upper.push(m.v(x+cx*r*.80,y+h*(.72+.045*cz),z+cz*r*.83,col));
-          }
-          for(let k=0;k<5;k++){
-            const n=(k+1)%5;
-            m.face(foot[k],stem[k],foot[n]);m.face(foot[n],stem[k],stem[n]);
-            m.face(stem[k],lower[k],lower[n]);
-            m.face(lower[k],upper[k],lower[n]);m.face(lower[n],upper[k],upper[n]);
-            m.face(tip,upper[n],upper[k]);
-          }
-        }
-      }
-    }
-    m.emit();
-  }
-  // Irregular faceted crowns are built once along with the trees, sparse grass and boulders.
   function form(m,x,y,z,rx,ry,rz,col,amp=0.19,segments=8,seed=rand()*700){
     const layers=[];
     for(let j=0;j<3;j++){
@@ -341,31 +413,7 @@ window.World = (() => {
       if(z<-22&&x>-30&&x<8&&z>-31)continue;
       forestPoints.push([x,z]);
     }
-    for(const [x,z] of forestPoints){
-      const y=height(x,z),h=between(4.5,9.4),scale=between(.81,1.13);
-      const r=h*.032,accent=colors[Math.floor(rand()*colors.length)];
-      const leanX=between(-.32,.32),leanZ=between(-.32,.32),cx=x+leanX,cz=z+leanZ;
-      const top=[cx,y+h*.72,cz];
-      G.rod(solids,[x,y-.07,z],top,r,'#786955',6);
-      if(rand()<.29){
-        // Layered silhouettes of araucarias, with a lifted canopy on a straight trunk.
-        for(let j=0;j<3;j++){
-          const a=rand()*6.283,cx2=cx+Math.cos(a)*h*.14,cz2=cz+Math.sin(a)*h*.14;
-          G.rod(solids,[cx,y+h*(.50+j*.065),cz],[cx2,y+h*(.66+j*.065),cz2],r*.49,'#72624d',5);
-          form(forms,cx2,y+h*(.70+j*.065),cz2,h*.21*scale,h*.075,h*.20*scale,accent,.28,7);
-        }
-        form(forms,cx,y+h*.94,cz,h*.15,h*.07,h*.16,accent,.2,8);
-      }else{
-        for(let j=0;j<3;j++){
-          const a=(j+rand()*.56)*2.094,extra=j===0?.045:.17;
-          const bx=cx+Math.cos(a)*h*extra,bz=cz+Math.sin(a)*h*extra;
-          const by=y+h*(j===0?.84:between(.57,.75));
-          if(j>0) G.rod(solids,[x,y+h*.37,z],[bx,by,bz],r*.55,'#82725b',5);
-          form(forms,bx,by,bz,h*between(.16,.22)*scale,h*between(.18,.26),h*between(.16,.22)*scale,accent,.30,7);
-        }
-      }
-      circularObstacle(x,z,r*1.05);
-    }
+    Rural.registerGrove(forestPoints);
     for(let i=0;i<122;i++){
       const x=between(-46,46),z=between(-39,39),sd=shelfDepth(x,z);
       if(x>9&&Math.abs(z+16)<5)continue;
@@ -379,6 +427,7 @@ window.World = (() => {
         form(forms,x,y+r*.33,z,r,r*between(.53,1.0),r*.78,blend(color(101,117,75),color(130,141,89),rand()),.36,6);
       }
     }
+    forms.emit();
     for(let i=0;i<1700;i++){
       const x=between(-45,78),z=between(-37,37),d=shelfDepth(x,z);
       if(x>10 && Math.abs(z+16)<5)continue;
@@ -387,12 +436,30 @@ window.World = (() => {
       if(d>0&&d<2.6||d>5.4&&d<8.4)continue;
       const y=height(x,z)-.03, h=between(.15,.48);
       const c=blend(color(80,113,58),color(155,154,89),rand());
+      const tile=tiles[Math.floor((x-X0)/TILE)+Math.floor((z-Z0)/TILE)*(W/TILE)];
+      const blades=tile.foliage||(tile.foliage=[]);
+      const pos=[];
       for(let k=0;k<3;k++){
         const a=rand()*Math.PI*2,dx=Math.cos(a)*.11,dz=Math.sin(a)*.11;
-        const u=forms.v(x-dx,y,z-dz,c),v=forms.v(x+dx,y,z+dz,c),w=forms.v(x+dz*1.9,y+h*between(.69,1.0),z-dx*1.9,c.map(q=>q*1.13));forms.face(u,v,w);forms.face(v,u,w);
+        pos.push(x-dx,y,z-dz,x+dx,y,z+dz,x+dz*1.9,y+h*between(.69,1),z-dx*1.9);
+      }
+      blades.push({x,z,y,pos,c});
+    }
+    for(const t of tiles)if(t.foliage)refreshGrass(t);
+  }
+  function refreshGrass(tile){
+    const p=[],ix=[],colors=[];
+    for(const tuft of tile.foliage){
+      if(Rural.bare(tuft.x,tuft.z))continue;
+      const offset=height(tuft.x,tuft.z)-.03-tuft.y;
+      for(let i=0;i<tuft.pos.length;i+=9){
+        const k=p.length/3;
+        for(let j=i;j<i+9;j+=3){p.push(tuft.pos[j],tuft.pos[j+1]+offset,tuft.pos[j+2]);colors.push(...tuft.c);}
+        ix.push(k,k+1,k+2,k+1,k,k+2);
       }
     }
-    forms.emit();
+    if(tile.grassNode)G.updateMesh(tile.grassNode,p,ix,'#ffffff',colors);
+    else if(ix.length)tile.grassNode=G.mesh(parent,p,ix,'#ffffff',colors);
   }
   const glyphs={
     A:['010','101','111','101','101'],B:['110','101','110','101','110'],C:['111','100','100','100','111'],D:['110','101','101','101','110'],
@@ -436,6 +503,19 @@ window.World = (() => {
     box(solids,x,y+h*.92,z,.084,h*.19,.084,'#f28542');
     const head=G.group(solids);head.p=[x,y+h*.92,z];
     G.mesh(head,[0,0,0,.47,-.07,.048,0,-.14,0],[0,2,1,1,2,0],'#ec7539');
+  }
+  const seats=[];
+  function outdoorSeat(label,x,z,width){
+    const ground=height(x,z),y=ground+.47;
+    box(solids,x,y-.055,z,width,.11,.45,'#976d47');
+    box(solids,x,y+.24,z-.21,width,.28,.065,'#926944');
+    for(const side of [-1,1]){
+      const lx=x+side*(width/2-.085);
+      for(const dz of [-.16,.16])box(solids,lx,ground+.20,z+dz,.065,.43,.065,'#44514a');
+      box(solids,lx,y+.15,z-.21,.055,.36,.06,'#44514a');
+    }
+    const collider={x,z,hw:width/2,hd:.245,top:y+.39};
+    obstacles.push(collider);seats.push({label,x,y,z,collider});
   }
   function facilities(){
     // Workshops sit outside the haul lane. The sloping metal roof has an open equipment bay.
@@ -488,6 +568,8 @@ window.World = (() => {
     box(office,2.8,1.16,1.58,.11,.04,.06,'#c6c9a8');
     box(office,2.51,.13,1.89,1.44,.24,.78,'#968b77');
     rectObstacle(ox,oz,8.7,3.9);
+    outdoorSeat('Banco da oficina',-16.3,-17.7,1.55);
+    outdoorSeat('Cadeira do escritório',-31,-3.25,.50);
     // Aggregate bays at the far corner and stacked drainage culverts near the shop.
     for(let i=0;i<2;i++){
       const bx=28+i*5.0,bz=-24.1,by=height(bx,bz);
@@ -580,13 +662,13 @@ window.World = (() => {
     flush();return true;
   }
   function create(root){
-    noiseSeed=38194;tiles.length=0;obstacles.length=0;dirty.clear();parent=G.group(root);solids=G.group(parent);
+    noiseSeed=38194;tiles.length=0;seats.length=0;obstacles.length=0;dirty.clear();parent=G.group(root);solids=G.group(parent);
     for(let iz=0;iz<=D;iz++)for(let ix=0;ix<=W;ix++){
       const x=X0+ix*STEP,z=Z0+iz*STEP,i=ix+iz*(W+1);
       heights[i]=original[i]=ground(x,z);baseColors.set(terrainColor(x,z),i*3);bakeMaterial(i,x,z);
     }
     for(let z=0;z<D/TILE;z++)for(let x=0;x<W/TILE;x++)groundTile(x,z);
-    landscape();details();facilities();forest();G.freeze(solids);return parent;
+    Rural.init(root,(x,z)=>sample(x,z),(x,z)=>sample(x,z,original));details();facilities();forest();G.freeze(solids);return parent;
   }
-  return {create,height,soil,materialPixels,materialWidth:W+1,materialHeight:D+1,dig:(x,z,r,v)=>moveSoil(x,z,r,v,-1),deposit:(x,z,r,v)=>moveSoil(x,z,r,v,1),grade,collides,flush,zones,bounds,snapshot,restore};
+  return {create,scoop,sweepBlade,refreshSurface,uploadMaterial,stream(x,z,range){parent.visible=x>=X0-range&&x<=X0+W+range&&z>=Z0-range&&z<=Z0+D+range;Rural.setRange(range);Rural.stream(x,z);},seats,height,soil,materialPixels,materialWidth:W+1,materialHeight:D+1,dig:(x,z,r,v)=>moveSoil(x,z,r,v,-1),deposit:(x,z,r,v)=>moveSoil(x,z,r,v,1),grade:(x,z,r,v,a)=>Rural.yard(x,z)?grade(x,z,r,v,a):Rural.modify(x,z,r,v,0,a),collides,flush,zones,bounds,snapshot,restore};
 })();

@@ -138,6 +138,12 @@
   function mesh(parent,positions,indices,color,colors){
     return shape(parent,[0,0,0],[1,1,1],geom(meshGeometry(positions,indices,colors)),colors?white:color);
   }
+  // Only sector-owned terrain meshes are released. Tree primitives share buffers.
+  function releaseMesh(node){
+    const g=node._geom,b=rt?.batches.get(g);
+    if(b){if(b.buffer)rt.gl.deleteBuffer(b.buffer);rt.batches.delete(g);}
+    if(rt&&g.gpu?.gen===rt.gen){rt.gl.deleteBuffer(g.gpu.buffer);g.gpu=null;}
+  }
   function updateMesh(n,positions,indices,color,colors){
     n._geom.vertices=meshGeometry(positions,indices,colors);n._geom.revision++;n._tint=colors?white:rgb(color);
     return n;
@@ -510,7 +516,7 @@
       const phase=Math.floor(opts.env.hours*6)*20+Math.round(opts.env.rain*12);
       if(phase!==skyPhase){skyFov=0;skyPhase=phase;}
       sky(fov);frame.set(background);depth.fill(0);stats={draws:0,triangles:0,instances:0,software:true};
-      walk(root);contacts(opts.contactShadows);ctx.putImageData(image,0,0);
+      walk(root);contacts(opts.contactShadows);if(opts.operator)Operators.raster(opts.operator.a,opts.operator.m,project,frame,depth,width,height);ctx.putImageData(image,0,0);
       const elapsed=performance.now()-start;if(elapsed>39)slow++;else slow=Math.max(0,slow-.35);
       if(slow>12&&budget>155000){budget=Math.max(155000,budget*.82);slow=0;}
       return stats;
@@ -672,6 +678,7 @@
       for(const param of [gl.TEXTURE_WRAP_S,gl.TEXTURE_WRAP_T])gl.texParameteri(gl.TEXTURE_2D,param,gl.CLAMP_TO_EDGE);
       for(const param of [gl.TEXTURE_MIN_FILTER,gl.TEXTURE_MAG_FILTER])gl.texParameteri(gl.TEXTURE_2D,param,gl.LINEAR);
     }else gl.bindTexture(gl.TEXTURE_2D,rt.field);
+    World.uploadMaterial(gl);
   }
   function draw(root,eye,target,opts={}){
     const env=opts.env;
@@ -710,8 +717,8 @@
     const lamp=opts.lamp;
     gl.uniform4f(lit.u.uLamp,lamp.x,lamp.y+2,lamp.z,lamp.running?(1-env.daylight)*1.75:0);
     gl.uniform2f(lit.u.uHeading,Math.sin(lamp.heading),Math.cos(lamp.heading));
-    renderBatches(true);return rt.stats;
+    renderBatches(true);if(opts.operator)Operators.gpu(gl,vp,opts.operator,env);return rt.stats;
   }
-  scope.G={group,box,cyl,beam,rod,align,mesh,updateMesh,sphere,freeze,worldPoint,init,draw,resize,
+  scope.G={releaseMesh,group,box,cyl,beam,rod,align,mesh,updateMesh,sphere,freeze,worldPoint,init,draw,resize,
     get ready(){return !!soft || !!rt && !rt.gl.isContextLost();},get software(){return !!soft;},get stats(){return soft?soft.stats:rt?rt.stats:null;}};
 })(typeof window!=="undefined"?window:globalThis);

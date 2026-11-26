@@ -782,5 +782,13 @@
     const n=m.type==='exc'?m.arm.tip:m.type==='back'?(m.tool==='rear'?m.arm.tip:m.front.tip):m.type==='grader'?m.gradeTip:m.dump;
     return G.worldPoint(n,[0,0,0]);
   }
-  window.Machines={create,pose,tip,view};
+  function cuttingEdge(m){
+    return [-1.66,1.66].map(x=>G.worldPoint(m.bladeTurn,[x,-.018,.22]));
+  }
+  function bucketEdge(m){
+    const front=m.type==='back'&&m.tool==='front',tip=front?m.front.tip:m.arm.tip;
+    const half=front?1.03:.51;
+    return [G.worldPoint(tip,[-half,0,0]),G.worldPoint(tip,[half,0,0])];
+  }
+  window.Machines={bucketEdge,create,pose,tip,view,cuttingEdge};
 })();
