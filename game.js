@@ -162,36 +162,71 @@
       dirty = false;
     } catch (_) { /* O turno continua em memória mesmo sem espaço no dispositivo. */ }
   }
-  function boot() {
-    if (ready) return;
-    G.init(canvas);
+  const cover = document.getElementById('cover');
+  const loading = document.getElementById('loading');
+  let displayScene, previewTimer;
+  function preview() {
+    clearTimeout(previewTimer);
+    if (cover.hidden || starting || document.hidden || document.querySelector('dialog[open]')) return;
+    try {
+      if (!G.ready) G.init(canvas);
+      if (!displayScene) {
+        displayScene = G.group();
+        Machines.create('exc', displayScene);
+        G.box(displayScene,[0,-.18,0],[90,.35,90],'#785b42');
+      }
+      const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+      const angle = .89 + (still ? 0 : .16 * Math.sin(performance.now()/11500));
+      const portrait = canvas.clientWidth < canvas.clientHeight;
+      G.draw(displayScene,[11*Math.cos(angle),4.4,11*Math.sin(angle)],portrait?[0,1.1,1]:[1.7,1.35,-1.4],
+        {env:Atmosphere.state,lamp:{x:0,y:0,z:0,heading:0},pixelRatio:.7,fov:portrait?54:43,quality:'leve',shadows:false});
+      cover.classList.add('scene-ready');
+      if (!still) previewTimer=setTimeout(preview,G.software?250:90);
+    } catch(error) { cover.classList.remove('scene-ready'); }
+  }
+  new MutationObserver(preview).observe(cover,{attributes:true,attributeFilter:['hidden']});
+  for(const modal of document.querySelectorAll('dialog')) modal.addEventListener('close',preview);
+  document.addEventListener('visibilitychange',preview);
+  window.addEventListener('resize',preview);
+  requestAnimationFrame(preview);
+  async function stage(done,label) {
+    document.getElementById('loadingBar').value=done;
+    document.getElementById('loadingText').textContent=label;
+    await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+  }
+  async function boot() {
+    await stage(0,'Preparando o terreno');
+    if (!G.ready) G.init(canvas);
     root = G.group();
     World.create(root);
+    await stage(1,'Posicionando a frota');
     Sim.init(root);
+    await stage(2,'Carregando personagem');
+    await Operators.ensure();
     Walker.init(root);phone=G.box(root,[0,0,0],[.066,.14,.014],'#19232b');phone.visible=false;
-    setupContact();
-    buildLandingGuide();
-    ready = true;
-    restore();
+    await stage(3,'Restaurando o turno');
+    setupContact(); buildLandingGuide(); restore(); ready = true;
+    await stage(4,'Canteiro pronto');
   }
   function requestFrame() {
     if (!frame && playing && !paused && !document.hidden && !contextLost) frame = requestAnimationFrame(loop);
   }
-  function start(type) {
-    Operators.ensure().catch(e=>{console.error(e);notice("Falha ao carregar personagem.");});
+  async function start(type) {
     if (!types.includes(type) || starting) return;
-    startAudio();
-    starting = true;
-    if (ready) { enter(type); return; }
-    const button = document.getElementById('start');
-    button.disabled = true;
-    button.setAttribute('aria-busy', 'true');
-    document.getElementById('startLabel').textContent = 'Preparando canteiro…';
-    requestAnimationFrame(() => requestAnimationFrame(() => enter(type)));
+    startAudio(); starting = true;
+    clearTimeout(previewTimer);
+    if (!ready) {
+      loading.hidden=false;
+      try { await boot(); }
+      catch(error) {
+        console.error(error); starting=false; UI.garage(type);
+        notice('Falha ao preparar o canteiro. Tente novamente.'); return;
+      } finally { loading.hidden=true; }
+    }
+    enter(type);
   }
   function enter(type) {
     try {
-      boot();
       onFoot = false; Walker.hide(); clearInput(); Sim.select(type); selected = type;
       const m = Sim.active(); Sim.occupy(m,true);
       mode = type === 'exc' || (type === 'back' && m.tool === 'rear') ? 'work' : 'drive';
@@ -347,7 +382,7 @@
     const terrain=World.soil(pos.x,pos.z),mud=terrain.basin*Atmosphere.state.wet;
     const surface=terrain.sand>.50?'Areia':terrain.gravel>.50?'Brita':mud>.38?'Lama':terrain.cover>.50?'Grama':Atmosphere.state.wet>.16?'Terra úmida':'Terra seca';
     UI.hud({fps,time:Atmosphere.time(),weather:Atmosphere.label(),surface,running:m.running,fuel:m.fuel,oil:m.oil,diesel:m.dieselCargo,oilCargo:m.oilCargo,work,nearSite,type:m.type,mode,tool:m.tool,onFoot,inverted,action:pos.action,nearSeat:onFoot&&!pos.action&&Walker.nearSeat(Sim.all())?.label,nearMachine:near?names[near.type]:null,
-      speed:Math.abs(m.speed)*3.6, load:m.load,capacity:m.capacity,camera:cameraNames[cam.kind],sound:sounds,rpm:Math.round(m.rpm),
+      signedSpeed:m.speed, implement:m.type==="grader"?m.bladeAngle:m.type==="truck"?m.bed:m.type==="back"&&m.tool==="front"?m.frontCurl:m.curl, speed:Math.abs(m.speed)*3.6, load:m.load,capacity:m.capacity,camera:cameraNames[cam.kind],sound:sounds,rpm:Math.round(m.rpm),
       ...obj,map:{work,machines,zones:World.zones,onFoot,heading:pos.heading,x:pos.x,z:pos.z}});
   }
 

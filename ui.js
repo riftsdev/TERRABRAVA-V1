@@ -17,6 +17,21 @@
   const game=(fn,...args)=>{if(window.Game && typeof Game[fn]==='function')return Game[fn](...args)};
   const text=(el,t)=>{const v=String(t);if(el.textContent!==v)el.textContent=v};
   const pressed=(el,v)=>{const s=String(!!v);if(el.getAttribute('aria-pressed')!==s)el.setAttribute('aria-pressed',s)};
+  for (const [element,variable,fallback] of [
+    [ui.hudSize,'--hud-scale','1'],[ui.hudOffset,'--hud-offset','0px'],[ui.hudAlpha,'--hud-alpha','1']
+  ]) {
+    const key='terrabrava.'+element.id;
+    let value=fallback;
+    try { value=localStorage.getItem(key)||fallback; } catch (_) {}
+    element.value=Array.from(element.options).some(o=>o.value===value)?value:fallback;
+    function apply(){document.documentElement.style.setProperty(variable,element.value);}
+    apply();
+    element.onchange=()=>{apply();try{localStorage.setItem(key,element.value);}catch(_){}};
+  }
+  function inputKind(kind){document.documentElement.dataset.input=kind;}
+  window.addEventListener('pointerdown',e=>inputKind(e.pointerType==='touch'?'touch':'mouse'),{passive:true});
+  window.addEventListener('keydown',()=>inputKind('keyboard'));
+  window.addEventListener('gamepadconnected',()=>inputKind('gamepad'));
   function select(type) {
     if(!fleet[type])return;
     selected=type;
@@ -142,9 +157,9 @@
   }
   function interactions(machine,seat,loaded){
     ui.enterNearby.hidden=!machine;
-    if(machine)text(ui.enterNearby,'Entrar · '+fleet[machine.type].name);
+    if(machine)text(ui.enterNearby.querySelector("span"),'Entrar · '+fleet[machine.type].name);
     ui.sitNearby.hidden=!seat;ui.sitNearby.disabled=!loaded;
-    if(seat)text(ui.sitNearby,'Sentar · '+seat.label);
+    if(seat)text(ui.sitNearby.querySelector("span"),'Sentar · '+seat.label);
     ui.callPhone.disabled=!loaded;
     openDialog(ui.interactions);
     ui.interactions.querySelector('button:not([hidden]):not([disabled])').focus();
@@ -168,7 +183,7 @@
       if(e.clientX<b.left||e.clientX>b.right||e.clientY<b.top||e.clientY>b.bottom)closeDialog(dialog);
     });
   }
-  function showGuide(){ui.viewDistance.value=game('getDistance');ui.graphics.value=game('getQuality')||'auto';ui.volume.value=Math.round((game('getVolume')??.8)*100);text(ui.volumeRead,ui.volume.value+'%');ui.helpMachine.value=playing ? state?.type||selected : selected;guide();openDialog(ui.guide)}
+  function showGuide(){const kind=document.documentElement.dataset.input;if(kind)helpInput=kind==='gamepad'?'pad':kind==='touch'?'touch':'keys';ui.viewDistance.value=game('getDistance');ui.graphics.value=game('getQuality')||'auto';ui.volume.value=Math.round((game('getVolume')??.8)*100);text(ui.volumeRead,ui.volume.value+'%');ui.helpMachine.value=playing ? state?.type||selected : selected;guide();openDialog(ui.guide)}
   ui.garageHelp.onclick=ui.hudHelp.onclick=showGuide;
   ui.closeGuide.onclick=()=>closeDialog(ui.guide);
   const helpTabs={touch:ui.touchHelp,keys:ui.keyHelp,pad:ui.padHelp};
@@ -316,6 +331,12 @@
     text(ui.keyMove,walking?'Caminhar':'Dirigir');
     text(ui.hudName,walking?'Operador a pé':f.name);text(ui.speed,Math.round(s.speed||0));text(ui.load,(s.load||0).toFixed(2).replace('.',','));text(ui.rpm,Math.round(s.rpm||0));
     ui.loadWrap.hidden=ui.loadDivider.hidden=!(s.capacity>0);
+    text(ui.capacityRead,' / '+Number(s.capacity||0).toLocaleString('pt-BR'));
+    text(ui.direction,Math.abs(s.signedSpeed)<.04?'•':s.signedSpeed>0?'▲':'▼');
+    ui.direction.title=Math.abs(s.signedSpeed)<.04?'Parado':s.signedSpeed>0?'Avanço':'Ré';
+    const toolLabel={exc:'Concha',back:s.tool==='front'?'Pá':'Concha',grader:'Lâmina',truck:'Caçamba'}[s.type];
+    ui.toolRead.hidden=!toolLabel;
+    if(toolLabel)text(ui.toolRead,toolLabel+' '+(s.type==='grader'?Math.round(s.implement*180/Math.PI)+'°':Math.round(s.implement*100)+'%'));
     ui.loadWrap.title='Capacidade: '+(s.capacity||0).toFixed(1).replace('.',',')+' m³';
     pressed(ui.workMode,s.mode==='work');pressed(ui.driveMode,s.mode==='drive');
     ui.toolToggle.hidden=walking||s.type!=='back';text(ui.toolToggle.querySelector('span'),s.tool==='rear'?'Traseiro':'Dianteira');

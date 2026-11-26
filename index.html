@@ -8,7 +8,7 @@
 <link rel="icon" href="assets/icone-32.png">
 <link rel="apple-touch-icon" href="assets/icone-180.png">
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="preload" href="assets/capa.jpg" as="image">
+
 <link rel="stylesheet" href="style.css">
 <script defer src="assets/solo.js"></script>
 <script defer src="engine.js"></script>
@@ -25,6 +25,7 @@
 <script defer src="sound.js"></script>
 <script defer src="rain.js"></script>
 <script defer src="game.js"></script>
+<script defer src="pwa.js"></script>
 </head>
 <body>
 <svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" class="symbols"><defs>
@@ -51,9 +52,16 @@
 <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M6 15a4 4 0 1 1 .6-8 6 6 0 0 1 11.1 1.1A3.6 3.6 0 0 1 18 15H6zm1 3-1 2m6-2-1 3m6-3-1 2"/></symbol>
 <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
 <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 6v6l4 2"/></symbol>
-</defs></svg>
+<symbol id="i-seat" viewBox="0 0 24 24"><path d="M5 3v13h14v5M6 16v5M9 4v8h10"/></symbol><symbol id="i-phone" viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="20" rx="2"/><path d="M10 18h4"/></symbol><symbol id="i-saw" viewBox="0 0 24 24"><path d="M2 12h9v7H2zM4 12V8h5l2 4 9-6 2 3-11 8"/></symbol></defs></svg>
 <canvas id="rainFx" aria-hidden="true"></canvas><canvas id="scene" aria-label="Canteiro Serra Alta em três dimensões"></canvas>
-<main id="cover" aria-label="Menu inicial de Terra Brava"><div class="cover-art"><img src="assets/capa.jpg" alt="Terra Brava • frota do canteiro" draggable="false"><button id="coverStart" aria-label="Começar"><span>Começar</span></button><button id="coverSettings" aria-label="Configuração"><span>Configuração</span></button></div><button id="coverCharacter">Personagem <strong id="operatorName"></strong></button></main>
+<main id="cover" aria-label="Menu inicial de Terra Brava"><section class="launch">
+<p class="site-location"><svg aria-hidden="true"><use href="#i-pin"/></svg> Serra Alta <i></i> Minas Gerais</p>
+<h1>Terra<br><em>Brava</em></h1>
+<nav aria-label="Menu principal">
+<button id="coverStart"><svg aria-hidden="true"><use href="#i-play"/></svg>Começar</button>
+<button id="coverCharacter"><svg aria-hidden="true"><use href="#i-walk"/></svg>Personagem <strong id="operatorName"></strong></button>
+<button id="coverSettings"><svg aria-hidden="true"><use href="#i-gear"/></svg>Configurações</button></nav></section></main>
+<section id="loading" hidden role="status"><div><strong id="loadingText">Preparando canteiro</strong><progress id="loadingBar" max="4" value="0"></progress></div></section>
 <main id="garage" class="garage" hidden>
  <header class="masthead">
    <a class="brand" href="#" id="brand" aria-label="Terra Brava, garagem"><svg><use href="#i-mark"/></svg><span>TERRA <em>BRAVA</em></span></a>
@@ -101,18 +109,21 @@
    <span class="near-cab game-glass" id="nearCab" hidden></span>
    <div class="control-tools"><button class="hud-pill" id="ignition">Ligar motor</button><button class="hud-pill" id="service" hidden>Atender</button><button class="hud-pill" id="interact" aria-label="Sair da máquina (E)"><svg><use href="#i-walk"/></svg><span>Sair</span></button><button class="hud-pill" id="toolToggle" hidden><svg><use href="#i-swap"/></svg><span>Dianteira</span></button><button class="hud-pill" id="brake" aria-label="Segurar freio"><svg><use href="#i-brake"/></svg><span>Freio</span></button></div>
    <div class="mode-toggle" id="modeSelector" role="group" aria-label="Modo de comando"><button id="workMode" aria-pressed="true"><svg><use href="#i-work"/></svg><span>Trabalho</span></button><button id="driveMode" aria-pressed="false"><svg><use href="#i-steer"/></svg><span>Condução</span></button></div>
-   <div class="instruments" id="instruments"><span><b id="speed">0</b> km/h</span><i></i><span id="loadWrap"><b id="load">0,0</b> m³</span><i id="loadDivider"></i><span><b id="rpm">800</b> rpm</span></div>
+   <div class="instruments" id="instruments"><span><strong id="direction" aria-label="Sentido"></strong> <b id="speed">0</b> km/h</span><i></i><span id="loadWrap"><b id="load">0,0</b><small id="capacityRead"></small> m³</span><i id="loadDivider"></i><span><b id="rpm">800</b> rpm</span><span id="toolRead"></span></div>
  </div>
  <div class="desktop-keys game-glass" id="desktopKeys"><span><kbd>WASD</kbd><span id="keyMove">Dirigir</span></span><span id="keyHyd"><kbd>TGFH</kbd><kbd>IKJL</kbd> Hidráulica</span><span><kbd>E</kbd><span id="keyInteract">Sair</span></span></div>
 </div>
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-<dialog id="interactions" aria-labelledby="interactionsTitle"><h2 id="interactionsTitle">Interações</h2><div class="operator-options"><button id="enterNearby">Entrar</button><button id="sitNearby">Sentar</button><button id="callPhone">Fazer ligação</button><button id="closeInteractions">Voltar</button></div></dialog>
+<dialog id="interactions" aria-labelledby="interactionsTitle"><h2 id="interactionsTitle">Interações</h2><div class="operator-options"><button id="enterNearby"><svg aria-hidden="true"><use href="#i-machine"/></svg><span>Entrar</span></button><button id="sitNearby"><svg aria-hidden="true"><use href="#i-seat"/></svg><span>Sentar</span></button><button id="callPhone"><svg aria-hidden="true"><use href="#i-phone"/></svg><span>Fazer ligação</span></button><button disabled id="sawSlot" title="Ferramenta futura"><svg aria-hidden="true"><use href="#i-saw"/></svg><span>Motosserra <small>Indisponível</small></span></button><button id="closeInteractions" aria-label="Fechar">×</button></div></dialog>
 <dialog id="characterDialog" aria-labelledby="characterTitle"><div class="operator-layout"><div class="operator-stage"><canvas id="operatorPreview" width="260" height="290" aria-label="Modelo 3D do personagem"></canvas><small role="status" id="operatorStatus"></small></div><section><h2 id="characterTitle">Seu personagem</h2><div class="operator-options"><button data-operator="Masculino">Masculino</button><button data-operator="Feminino">Feminino</button></div><p>A pé, segure Shift para correr ou empurre o analógico até o fim.</p><div class="operator-actions"><button id="cancelOperator">Voltar</button><button id="confirmOperator">Confirmar</button></div></section></div></dialog>
 <dialog id="guide" aria-labelledby="guideTitle"><div class="dialog-top"><div><span class="section-tag">MANUAL DO OPERADOR</span><h2 id="guideTitle">Configuração</h2></div><button id="closeGuide" class="dismiss" type="button" aria-label="Fechar"><svg><use href="#i-close"/></svg></button></div>
  <div class="guide-scroll">
    <label class="guide-select">Distância de visão <select id="viewDistance"><option value="64">Curta · 64 m</option><option value="96">Média · 96 m</option><option value="160">Longa · 160 m</option></select></label>
    <label class="guide-select">Gráficos <select id="graphics"><option value="auto">Automático</option><option value="leve">Leve</option></select></label>
-   <div class="field-settings"><label for="volume">Volume geral</label><input id="volume" type="range" min="0" max="100" value="80"><output id="volumeRead" for="volume">80%</output></div>
+   <label class="guide-select">Tamanho do HUD<select id="hudSize"><option value=".9">Compacto</option><option value="1">Padrão</option><option value="1.1">Ampliado</option></select></label>
+<label class="guide-select">Posição dos controles<select id="hudOffset"><option value="0px">Base da tela</option><option value="12px">Elevada</option><option value="24px">Mais elevada</option></select></label>
+<label class="guide-select">Opacidade do HUD<select id="hudAlpha"><option value="1">100%</option><option value=".85">85%</option><option value=".7">70%</option></select></label>
+<div class="field-settings"><label for="volume">Volume geral</label><input id="volume" type="range" min="0" max="100" value="80"><output id="volumeRead" for="volume">80%</output></div>
    <fieldset class="help-tabs" aria-label="Tipo de comando"><button id="touchHelp" type="button" aria-pressed="true">Tela de toque</button><button id="keyHelp" type="button" aria-pressed="false">Teclado</button><button id="padHelp" type="button" aria-pressed="false">Gamepad</button></fieldset>
    <label class="guide-select">Máquina <select id="helpMachine"><option value="exc">Escavadeira hidráulica</option><option value="back">Retroescavadeira</option><option value="grader">Motoniveladora</option><option value="truck">Caminhão basculante</option><option value="bike">Moto de trilha</option><option value="pickup">Picape de serviço</option></select></label>
    <div class="guide-scheme"><span>Demais eixos hidráulicos</span><div role="group" aria-label="Sentido das alavancas hidráulicas"><button id="mirrorScheme" type="button" aria-pressed="true">Espelhado</button><button id="oldScheme" type="button" aria-pressed="false">Anterior</button></div></div>

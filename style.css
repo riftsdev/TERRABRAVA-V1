@@ -129,3 +129,39 @@ dialog{color:#f6f6eb;background:#242924;border:1px solid #69705e;border-radius:9
 #interactions h2{margin:0 0 12px}#interactions .operator-options{display:grid}
 #interactions button{min-height:44px;text-align:left;border:1px solid #56685e;border-radius:6px;padding:8px 12px;background:#2b3932;color:#fff}
 #interactions button:focus-visible{outline:2px solid #edb354}#interactions [hidden]{display:none}
+
+/* Interface do canteiro */
+:root{--industrial:#ff812e;--hud-scale:1;--hud-alpha:1;--hud-offset:0px}
+#cover{display:flex;align-items:center;justify-content:flex-start;padding:max(20px,env(safe-area-inset-top)) max(7vw,env(safe-area-inset-right)) max(20px,env(safe-area-inset-bottom)) max(7vw,env(safe-area-inset-left));background:linear-gradient(90deg,#11161af5,#11161acc 35%,#10141638 77%),url(assets/serra.webp) center/cover}
+#cover.scene-ready{background:linear-gradient(90deg,#0e1419fa 0%,#11161ae6 26%,#11161a75 48%,#0c101514 76%),linear-gradient(0deg,#10141877,transparent 35%)}
+.launch{width:min(360px,42vw);isolation:isolate}
+.site-location{display:flex;align-items:center;gap:10px;text-transform:uppercase;letter-spacing:.15em;font:700 12px TBBold,sans-serif;color:#edece5}
+.site-location svg{color:var(--industrial);width:16px}.site-location i{width:22px;height:1px;background:#ff812e}
+.launch h1{margin:.21em 0 .35em -.035em;font:italic 900 clamp(72px,10vw,154px)/.8 TBBlack,sans-serif;text-transform:uppercase;letter-spacing:-.045em;color:#fff;animation:launch-in .5s ease-out}
+.launch h1 em{color:var(--industrial)}.launch nav{display:grid;gap:7px}
+.launch nav button,#cover #coverCharacter{position:static;width:100%;height:auto;min-height:46px;display:flex;align-items:center;gap:12px;padding:10px 15px;text-align:left;background:#1a2024ed;color:white;border:1px solid #52595d;border-radius:5px;font:700 15px TBBold,sans-serif;transition:background .15s,transform .15s}
+.launch nav #coverStart{background:var(--industrial);border-color:var(--industrial);color:#171a1c}
+.launch nav button:hover{transform:translateX(3px);filter:brightness(1.13)}
+#operatorName{margin-left:auto;color:#ffc599;font-size:.85em}
+#loading{position:fixed;inset:0;z-index:12;display:grid;place-items:center;background:#11161af7}
+#loading[hidden]{display:none}#loading div{width:min(75vw,330px)}#loading strong{display:block;margin-bottom:15px}#loading progress{width:100%;height:8px;accent-color:var(--industrial)}
+.hud{opacity:var(--hud-alpha);--bottom:calc(max(12px,env(safe-area-inset-bottom)) + var(--hud-offset));--gold:#ffab74}
+.hud .game-glass,.hud .instruments,.hud .field-strip,.hud .mode-toggle,.hud .hud-pill,.hud .hud-icon,.hud .pad-head{background:#171d22e6;border:1px solid #62696d9c;color:#f6f6f5;box-shadow:0 2px 8px #0002;backdrop-filter:none;border-radius:6px}
+.hud .hud-brand{border-left:3px solid var(--industrial)}.hud .mark,.hud #speed,.hud #direction{color:var(--industrial)}
+.hud .instruments{flex-wrap:wrap;justify-content:center;gap:4px 9px;font-variant-numeric:tabular-nums}.instruments #speed{font-size:22px}.instruments #toolRead{color:#ffbc90}.instruments small{font-size:inherit}
+.hud .stick{background:radial-gradient(circle,#1e252b60,#171b2070 72%);border:1px solid #ffffff70}.hud .pad-nub{background:#e6e9ed88;border:1px solid #fff9}
+.touch-area,.control-center,.steer-arrows,.drive-arrows,.hud-brand,.radar{scale:var(--hud-scale);transform-origin:center bottom}
+#leftControl,.steer-arrows{transform-origin:left bottom}#rightControl,.drive-arrows{transform-origin:right bottom}.hud-brand{transform-origin:left top}
+.hud .control-center{transform-origin:left bottom}
+.hud .instruments,.hud .near-cab{animation:launch-in .18s ease-out}
+#interactions{width:min(400px,96vw);padding:16px;border-radius:14px;border-color:#596268;background:#151b20}
+#interactions h2{text-align:center;font:700 20px TBBold,sans-serif}
+#interactions .operator-options{position:relative;display:block;width:min(330px,84vw,70vh);aspect-ratio:1;margin:auto;background:radial-gradient(circle,transparent 47%,#5e686c70 48%,transparent 49%)}
+#interactions button{position:absolute;display:grid;justify-items:center;align-content:center;gap:4px;width:37%;height:29%;border-color:#52606a;text-align:center;font:700 12px/1.15 TBBold,sans-serif;background:#253039}
+#interactions button svg{color:#ffa566}#interactions button small{display:block}#interactions button:disabled{opacity:.55;cursor:default}
+#enterNearby{top:0;left:31.5%}#sitNearby{left:0;top:35.5%}#callPhone{right:0;top:35.5%}#sawSlot{bottom:0;left:31.5%}#interactions #closeInteractions{top:40%;left:40%;height:20%;width:20%;border-radius:50%;font-size:25px;color:#ffad6d}
+#characterDialog,#guide,#mapModal{background:#171e23;color:#fbfaf7;border-color:#596268}
+@keyframes launch-in{from{opacity:0;translate:0 8px}to{opacity:1;translate:0 0}}
+@media(orientation:portrait){#cover{align-items:end}.launch{width:min(100%,420px);margin:0 auto 3vh}.launch h1{font-size:clamp(64px,12vw,100px)}#cover.scene-ready{background:linear-gradient(0deg,#101519 1%,#101519ed 26%,#10151928 65%)}}
+@media(max-height:490px) and (orientation:landscape){.launch h1{font-size:clamp(54px,16vh,77px)}.site-location{margin:0}.launch nav button,#cover #coverCharacter{min-height:39px;padding:6px 12px}.launch nav{gap:4px}.hud .instruments{font-size:10px;gap:3px 6px}}
+@media(prefers-reduced-motion:reduce){.launch h1,.hud .instruments,.hud .near-cab{animation:none}.launch nav button{transition:none}}

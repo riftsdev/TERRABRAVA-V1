@@ -65,6 +65,7 @@
     nav = Number(edge(15) || edge(13)) - Number(edge(14) || edge(12));
     const [leftX, leftY] = stick(pad.axes[0], pad.axes[1]);
     const [rightX, rightY] = stick(pad.axes[2], pad.axes[3]);
+    if((buttons || leftX || leftY || rightX || rightY) && document.documentElement.dataset.input!=='gamepad')document.documentElement.dataset.input='gamepad';
     return {
       leftX, leftY, rightX, rightY,
       triggers: value(pad.buttons[7]) - value(pad.buttons[6]),
