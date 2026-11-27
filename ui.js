@@ -80,6 +80,7 @@
   ui.extraTools.addEventListener('click',()=>toolsOpen(false));
   ui.shiftTime.onclick=()=>game('nextTime');
   function missionOpen(value){ui.hint.hidden=!value;ui.missionToggle.setAttribute('aria-expanded',String(value));}
+  missionOpen(false);
   ui.missionToggle.onclick=()=>missionOpen(ui.hint.hidden);
   missionOpen(!matchMedia('(pointer:coarse), (max-width:750px)').matches);
   ui.viewDistance.onchange=()=>game('setDistance',ui.viewDistance.value);
@@ -167,6 +168,13 @@
   for(const [button,kind] of [[ui.enterNearby,'enter'],[ui.sitNearby,'sit'],[ui.callPhone,'call']]){
     button.onclick=()=>{closeDialog(ui.interactions);game('performInteraction',kind);};
   }
+  ui.handsFree.onclick=()=>closeDialog(ui.interactions);
+  ui.parkLatch.onclick=()=>game('toggleParking');
+  ui.pauseGame.onclick=()=>openDialog(ui.pauseMenu);
+  ui.resumeGame.onclick=()=>closeDialog(ui.pauseMenu);
+  ui.pauseGuide.onclick=()=>{ui.pauseMenu.addEventListener('close',showGuide,{once:true});closeDialog(ui.pauseMenu)};
+  ui.hideDetails.onclick=()=>{const hidden=ui.hud.classList.toggle('minimal');pressed(ui.hideDetails,hidden);text(ui.hideDetails,hidden?'Mostrar informações':'Ocultar informações');};
+  window.addEventListener('keydown',e=>{if(e.code==='Escape'&&playing&&!document.querySelector('dialog[open]')){e.preventDefault();openDialog(ui.pauseMenu);}});
   ui.closeInteractions.onclick=()=>closeDialog(ui.interactions);
   ui.interactions.onkeydown=e=>{
     if(e.code==='KeyE'&&!e.repeat){e.preventDefault();e.stopPropagation();document.activeElement?.click();}
@@ -175,7 +183,7 @@
     if(openedDuringPlay&&playing)game('pause',false);openedDuringPlay=false;
     if(previousFocus?.isConnected)previousFocus.focus({preventScroll:true});previousFocus=null;
   }
-  for(const dialog of [ui.guide,ui.mapModal,ui.interactions]){
+  for(const dialog of [ui.guide,ui.mapModal,ui.interactions,ui.pauseMenu]){
     dialog.addEventListener('close',resumeDialog);
     dialog.addEventListener('click',e=>{
       if(e.target!==dialog)return;
@@ -288,6 +296,12 @@
       c.fillStyle=color+'37';c.strokeStyle=color;c.setLineDash(large?[5,4]:[3,3]);c.lineWidth=large?1.8:1.45;c.beginPath();c.arc(sx,sz,z.r*scale,0,Math.PI*2);c.fill();c.stroke();c.setLineDash([]);
       if(large&&key==='depot'){c.font='bold 16px sans-serif';c.textAlign='center';c.fillStyle=color;c.fillText(label,sx,sz+z.r*scale+16);}
     }
+    if(!large){
+      c.fillStyle='#dbe8db';
+      for(const [,x,z] of Rural.sites)c.fillRect(X(x)-2,Z(z)-2,4,4);
+      const dest=map.work?.active?map.work.next:state?.stage===1?(state.type==='truck'?map.zones.dump:map.machines.find(v=>v.type==='truck')):state?.stage===2?map.zones.grade:null;
+      if(dest){const dx=X(dest.x)-w/2,dy=Z(dest.z)-h/2,f=Math.min(1,(w*.42)/Math.max(1,Math.hypot(dx,dy)));c.fillStyle='#ffd765';c.beginPath();c.arc(w/2+dx*f,h/2+dy*f,4,0,2*Math.PI);c.fill();}
+    }
     for(const m of map.machines||[]){
       const active=m.type===(map.onFoot?'person':state?.type);
       const x=X(m.x),y=Z(m.z);
@@ -296,7 +310,7 @@
       else{c.rect(large?-3:-2,large?-5:-3,large?6:4,large?10:6);c.fillStyle='#b2bba9';}
       c.lineWidth=1.5;c.strokeStyle='#293327';c.fill();c.stroke();c.restore();
     }
-    c.textAlign='left';c.fillStyle='#e0e8d8';c.font='bold '+(large?16:17)+'px sans-serif';c.fillText('N',8,large?22:21);
+    c.textAlign='left';c.fillStyle='#e0e8d8';c.font='bold '+(large?16:17)+'px sans-serif';c.fillText('N',large?8:w/2-6,large?22:19);
   }
   ui.mapButton.onclick=()=>{if(state?.map){drawMap(ui.mapLarge,state.map,true);openDialog(ui.mapModal)}};
   ui.closeMap.onclick=()=>closeDialog(ui.mapModal);
@@ -314,13 +328,14 @@
     const walking=!!s.onFoot;
     ui.hud.dataset.walking=String(walking);
     ui.modeSelector.hidden=ui.instruments.hidden=ui.brake.hidden=ui.camera.hidden=ui.keyHyd.hidden=walking;
-    ui.ignition.hidden=walking; text(ui.ignition,s.running?'Desligar':'Ligar motor');
+    ui.ignition.hidden=walking; text(ui.ignition.querySelector("span"),s.running?'Desligar':'Ligar motor');
     ui.service.hidden=!(s.nearSite&&!s.work.active)&&!(s.type==='pickup'&&!walking);
-    text(ui.service,s.nearSite&&!s.work.active?'Aceitar obra':'Atender');
+    text(ui.service.querySelector("span"),s.nearSite&&!s.work.active?'Aceitar obra':'Atender');
+    for(const button of [ui.ignition,ui.service,ui.toolToggle]){button.title=button.textContent;button.setAttribute('aria-label',button.textContent);}
     const money='R$ '+s.work.balance.toLocaleString('pt-BR');
     let status=walking?'A pé':(s.running?'Ligado':'Motor desligado')+(s.type==='bike'?'':' · '+Math.ceil(s.fuel)+' L');
     if(s.type==='pickup'&&!walking)status+=' · Carga '+Math.floor(s.diesel)+' L / '+Math.floor(s.oilCargo)+' L';
-    text(ui.statusLine,status+' · '+money);
+    text(ui.statusLine,status);text(ui.balance,money);
     if(!walking&&['bike','pickup','truck','grader'].includes(s.type))ui.modeSelector.hidden=true;
     ui.interact.disabled=false;
     const action=walking?(s.action==='sit'?'Levantar':s.action==='call'?'Desligar':'Interagir'):'Sair';
@@ -329,15 +344,24 @@
     ui.nearCab.hidden=!walking;
     text(ui.nearCab,s.action==='call'?'Em ligação':s.action==='sit'?'Sentado':s.nearSeat||s.nearMachine||'Interações');
     text(ui.keyMove,walking?'Caminhar':'Dirigir');
-    text(ui.hudName,walking?'Operador a pé':f.name);text(ui.speed,Math.round(s.speed||0));text(ui.load,(s.load||0).toFixed(2).replace('.',','));text(ui.rpm,Math.round(s.rpm||0));
-    ui.loadWrap.hidden=ui.loadDivider.hidden=!(s.capacity>0);
+    text(ui.hudName,walking?'Operador a pé':f.name);text(ui.speed,String(Math.round(s.speed||0)).padStart(3,'0'));text(ui.load,(s.load||0).toFixed(2).replace('.',','));text(ui.rpm,Math.round(s.rpm||0));
+    ui.loadWrap.hidden=!(s.capacity>0);
     text(ui.capacityRead,' / '+Number(s.capacity||0).toLocaleString('pt-BR'));
-    text(ui.direction,Math.abs(s.signedSpeed)<.04?'•':s.signedSpeed>0?'▲':'▼');
+    text(ui.direction,Math.abs(s.signedSpeed)<.04?'—':s.signedSpeed>0?'D':'R');
     ui.direction.title=Math.abs(s.signedSpeed)<.04?'Parado':s.signedSpeed>0?'Avanço':'Ré';
     const toolLabel={exc:'Concha',back:s.tool==='front'?'Pá':'Concha',grader:'Lâmina',truck:'Caçamba'}[s.type];
     ui.toolRead.hidden=!toolLabel;
     if(toolLabel)text(ui.toolRead,toolLabel+' '+(s.type==='grader'?Math.round(s.implement*180/Math.PI)+'°':Math.round(s.implement*100)+'%'));
     ui.loadWrap.title='Capacidade: '+(s.capacity||0).toFixed(1).replace('.',',')+' m³';
+    text(ui.dialVehicle,{exc:'Escavadeira',back:s.tool==='rear'?'Retro · traseira':'Retro · frente',grader:'Patrol',truck:'Basculante',bike:'Moto',pickup:'Picape'}[s.type]);
+    text(ui.cameraRead,s.camera);text(ui.fuelRead,Math.ceil(s.fuel)+' L');
+    ui.engineLamp.dataset.active=String(s.running);ui.engineLamp.title=s.running?'Motor ligado':'Motor desligado';
+    ui.hydLamp.hidden=!toolLabel;ui.hydLamp.dataset.active=String(s.hydraulic);
+    pressed(ui.parkLatch,s.parked);
+    for(const [arc,ratio] of [[ui.rpmArc,s.rpm/(s.type==='truck'?2110:1840)],[ui.fuelArc,s.fuel/100],[ui.loadArc,s.capacity?s.load/s.capacity:0]]){
+      const value=Math.round(100*Math.max(0,Math.min(1,ratio)));
+      if(arc.dataset.level!==String(value)){arc.dataset.level=value;arc.setAttribute('stroke-dasharray',value+' 100');}
+    }
     pressed(ui.workMode,s.mode==='work');pressed(ui.driveMode,s.mode==='drive');
     ui.toolToggle.hidden=walking||s.type!=='back';text(ui.toolToggle.querySelector('span'),s.tool==='rear'?'Traseiro':'Dianteira');
     ui.toolToggle.title='Trocar implemento da retroescavadeira';

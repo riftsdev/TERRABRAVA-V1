@@ -250,7 +250,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if ! gh release view v1.0-preview >/dev/null 2>&1; then
-            gh release create v1.0-preview --target "$GITHUB_SHA" --title "Terra Brava V1 - testes" --prerelease --notes "Compilacoes experimentais. APK assinado para depuracao; EXE sem assinatura comercial; IPA sem assinatura e requer assinatura valida antes de instalar. Compatibilidade e desempenho em aparelhos reais ainda nao verificados."
-          fi
-          gh release upload v1.0-preview dist/* --clobber
+          for file in dist/*; do
+            test -s "$file"
+            case "$file" in
+              *.apk|*.ipa) unzip -tq "$file" >/dev/null ;;
+              *.exe) test "$(head -c 2 "$file")" = MZ ;;
+              *.zip) unzip -tq "$file" >/dev/null ;;
+            esac
+          done
+          gh release create "serra-alta-hud-${GITHUB_RUN_NUMBER}" dist/* --target "$GITHUB_SHA" --prerelease --title "Serra Alta · HUD circular" --notes "Compilações disponíveis. O IPA exige assinatura válida para instalar."

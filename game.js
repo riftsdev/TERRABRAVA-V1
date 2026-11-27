@@ -17,6 +17,7 @@
   function setDistance(v){if([64,96,160].includes(+v)){distance=+v;try{localStorage.setItem('terrabrava.distancia',distance);}catch(_){}}}
   let tipNoticed = false, volume = .8, quality = "auto";
   let frame = 0, lastTime = 0, bank = 0, hudClock = 1, saveClock = 0, dirty = false;
+  const parked = new Set();
   let mode = 'work', selected = 'exc', footBrake = false, contextLost = false;
   let phone;
   let onFoot = false, inverted = true;
@@ -358,7 +359,7 @@
       leftY: hydraulic(pressed('KeyT','KeyG') + ((drives?0:sticks.left[1])+(m.type==='exc'||!drives?pad.leftY:0))),
       rightX: (m.type==='exc'||m.type==='back'?axis:hydraulic)(pressed('KeyL','KeyJ') + rightX),
       rightY: (m.type==='exc'||m.type==='back')?-axis(pressed('KeyI','KeyK')+rightY):hydraulic(pressed('KeyI','KeyK')+rightY),
-      brake: footBrake || keys.has('Space') || pad.brake, mode:m.type==='exc'?'work':mode
+      brake: parked.has(m.type) || footBrake || keys.has('Space') || pad.brake, mode:m.type==='exc'?'work':mode
     };
   }
   function updateHUD() {
@@ -382,7 +383,7 @@
     const terrain=World.soil(pos.x,pos.z),mud=terrain.basin*Atmosphere.state.wet;
     const surface=terrain.sand>.50?'Areia':terrain.gravel>.50?'Brita':mud>.38?'Lama':terrain.cover>.50?'Grama':Atmosphere.state.wet>.16?'Terra úmida':'Terra seca';
     UI.hud({fps,time:Atmosphere.time(),weather:Atmosphere.label(),surface,running:m.running,fuel:m.fuel,oil:m.oil,diesel:m.dieselCargo,oilCargo:m.oilCargo,work,nearSite,type:m.type,mode,tool:m.tool,onFoot,inverted,action:pos.action,nearSeat:onFoot&&!pos.action&&Walker.nearSeat(Sim.all())?.label,nearMachine:near?names[near.type]:null,
-      signedSpeed:m.speed, implement:m.type==="grader"?m.bladeAngle:m.type==="truck"?m.bed:m.type==="back"&&m.tool==="front"?m.frontCurl:m.curl, speed:Math.abs(m.speed)*3.6, load:m.load,capacity:m.capacity,camera:cameraNames[cam.kind],sound:sounds,rpm:Math.round(m.rpm),
+      parked:parked.has(m.type), hydraulic:m.running && Math.max(Math.abs(m.axes.rx),Math.abs(m.axes.ry),...(m.type==="exc"||m.tool==="rear"?[Math.abs(m.axes.lx),Math.abs(m.axes.ly)]:[]))>.03, signedSpeed:m.speed, implement:m.type==="grader"?m.bladeAngle:m.type==="truck"?m.bed:m.type==="back"&&m.tool==="front"?m.frontCurl:m.curl, speed:Math.abs(m.speed)*3.6, load:m.load,capacity:m.capacity,camera:cameraNames[cam.kind],sound:sounds,rpm:Math.round(m.rpm),
       ...obj,map:{work,machines,zones:World.zones,onFoot,heading:pos.heading,x:pos.x,z:pos.z}});
   }
 
@@ -559,5 +560,5 @@
   try { sounds = localStorage.getItem('terrabrava.som') !== '0'; } catch (_) {}
   try{const stored=localStorage.getItem('terrabrava.volume');if(stored!==null)volume=clamp(Number(stored)||0,0,1);}catch(_){}
   try{if(localStorage.getItem('terrabrava.qualidade')==='leve')quality='leve';}catch(_){}
-  window.Game = {setDistance,getDistance:()=>distance,start, ignition,service, garage, interact, performInteraction, toggleInversion, isInverted:()=>inverted, setMode, setStick, toggleTool, cycleCamera, cycleWeather, nextTime, setQuality, getQuality:()=>quality,setVolume, getVolume:()=>volume, toggleSound, setBrake(value) { footBrake = !!value; }, pause};
+  window.Game = {toggleParking(){if(!playing||onFoot||paused)return;const type=Sim.active().type;if(parked.has(type))parked.delete(type);else parked.add(type);updateHUD();},setDistance,getDistance:()=>distance,start, ignition,service, garage, interact, performInteraction, toggleInversion, isInverted:()=>inverted, setMode, setStick, toggleTool, cycleCamera, cycleWeather, nextTime, setQuality, getQuality:()=>quality,setVolume, getVolume:()=>volume, toggleSound, setBrake(value) { footBrake = !!value; }, pause};
 })();
